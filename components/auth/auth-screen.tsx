@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, FlaskConical, Loader2 } from "lucide-react";
 import appConfig from "@/app.config";
 import { useLang } from "@/components/i18n/language-provider";
 import { Logo } from "@/components/ui/logo";
@@ -12,6 +12,10 @@ import { Input, Label } from "@/components/ui/input";
 import { LanguageToggle } from "@/components/ui/language-toggle";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/client";
+
+// Shared review account for instructors/testers (public by design, no real data).
+const TEST_EMAIL = process.env.NEXT_PUBLIC_TEST_EMAIL ?? "clause.demo.review@gmail.com";
+const TEST_PASSWORD = process.env.NEXT_PUBLIC_TEST_PASSWORD ?? "ClauseDemo#2026";
 
 /**
  * Login / signup. With Supabase keys in .env.local this does real auth; with
@@ -78,6 +82,23 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     } else {
       setMessage({ kind: "info", text: ui.authCheckEmail });
     }
+  }
+
+  async function testLogin() {
+    if (!isSupabaseConfigured) return enter();
+    setMessage(null);
+    setLoading(true);
+    const { error } = await createClient().auth.signInWithPassword({
+      email: TEST_EMAIL,
+      password: TEST_PASSWORD,
+    });
+    if (error) {
+      setMessage({ kind: "error", text: ui.authError });
+      setLoading(false);
+      return;
+    }
+    router.push("/dashboard");
+    router.refresh();
   }
 
   async function oauth(provider: "google" | "github") {
@@ -214,6 +235,20 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
               {!loading && <ArrowRight className="h-4 w-4" />}
             </Button>
           </form>
+
+          <div className="space-y-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading}
+              onClick={testLogin}
+              className="w-full gap-2 border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
+            >
+              <FlaskConical className="h-4 w-4" />
+              {ui.testLogin}
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">{ui.testLoginHint}</p>
+          </div>
 
           {!isSupabaseConfigured && (
             <>
