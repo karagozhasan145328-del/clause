@@ -24,6 +24,8 @@ export interface Analysis {
   recommendations: string[];
   /** How many court-decision citations were stripped by the server guard. */
   removedCitations?: number;
+  /** Figures in proposed text that were not in the document and were replaced by placeholders. */
+  blankedFigures?: number;
 }
 
 /** A row of the public.analyses table. */
@@ -107,8 +109,51 @@ export function stripDecisionCitations(analysis: Analysis): number {
   return removed;
 }
 
+/**
+ * Amounts, percentages and durations (TR + EN) — the figures a model must not invent.
+ * Unit suffixes are matched with a Unicode-aware lookahead (JS `\b` is ASCII-only: "gün" would miss).
+ */
+const FIGURE_RES: { re: RegExp; placeholder: { tr: string; en: string } }[] = [
+  { re: /%\s?\d[\d.,]*|\d[\d.,]*\s?%/g, placeholder: { tr: "%[ORAN]", en: "[RATE]%" } },
+  {
+    re: /\d[\d.,]*\s?(?:TL|TRY|₺|lira|USD|EUR|€|\$)(?![\p{L}\d])/giu,
+    placeholder: { tr: "[TUTAR] TL", en: "[AMOUNT]" },
+  },
+  {
+    re: /\d[\d.,]*\s?(?:gün|hafta|ay|yıl|saat|days?|weeks?|months?|years?|hours?)(?![\p{L}\d])/giu,
+    placeholder: { tr: "[SÜRE]", en: "[PERIOD]" },
+  },
+];
+
+const digitRuns = (s: string) => (s.match(/\d+/g) ?? []).map((d) => d.replace(/^0+(?=\d)/, ""));
+
+/**
+ * Replaces amounts/percentages/durations in proposed clause text that do not appear in the
+ * analysed document with an empty placeholder. Returns the number of figures replaced.
+ */
+export function blankInventedFigures(analysis: Analysis, source: string, lang: "tr" | "en"): number {
+  const sourceDigitRuns = new Set(digitRuns(source));
+  let replaced = 0;
+  const fix = (text: string | undefined) => {
+    if (!text) return text;
+    let out = text;
+    for (const { re, placeholder } of FIGURE_RES) {
+      out = out.replace(re, (m) => {
+        // Keep a figure only if every digit-run in it occurs in the source document.
+        const runs = digitRuns(m);
+        if (runs.length > 0 && runs.every((r) => sourceDigitRuns.has(r))) return m;
+        replaced++;
+        return placeholder[lang];
+      });
+    }
+    return out;
+  };
+  analysis.findings = analysis.findings.map((f) => ({ ...f, suggestedFix: fix(f.suggestedFix) }));
+  return replaced;
+}
+
 /** Coerces model output into a well-formed, severity-sorted Analysis. */
-export function sanitizeAnalysis(raw: Partial<Analysis>): Analysis {
+export function sanitizeAnalysis(raw: Partial<Analysis>, source = "", lang: "tr" | "en" = "tr"): Analysis {
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   const strs = (v: unknown) => (Array.isArray(v) ? v.map(str).filter(Boolean) : []);
 
@@ -132,5 +177,7 @@ export function sanitizeAnalysis(raw: Partial<Analysis>): Analysis {
   };
   const removed = stripDecisionCitations(analysis);
   if (removed > 0) analysis.removedCitations = removed;
+  const blanked = blankInventedFigures(analysis, source, lang);
+  if (blanked > 0) analysis.blankedFigures = blanked;
   return analysis;
 }

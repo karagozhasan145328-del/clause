@@ -76,7 +76,7 @@ export async function POST(request: Request) {
   let analysis: Analysis;
   try {
     const json = await res.json();
-    analysis = sanitizeAnalysis(JSON.parse(json.choices?.[0]?.message?.content ?? ""));
+    analysis = sanitizeAnalysis(JSON.parse(json.choices?.[0]?.message?.content ?? ""), text, lang);
   } catch {
     return err("bad_model_output", "The model returned an unreadable response. Try again.", 502);
   }

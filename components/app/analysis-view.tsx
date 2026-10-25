@@ -51,6 +51,14 @@ export function AnalysisView({ result }: { result: Analysis }) {
         </p>
       ) : null}
 
+      {result.blankedFigures ? (
+        <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+          {tr
+            ? `Önerilen metinlerde belgede bulunmayan ${result.blankedFigures} tutar/oran/süre uydurmamak için boş bırakıldı (köşeli parantez). Metni kullanmadan önce doldurun.`
+            : `${result.blankedFigures} amount/rate/period in the proposed text was not in the document and was left blank (square brackets). Fill it in before use.`}
+        </p>
+      ) : null}
+
       {findings.length > 0 && (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">

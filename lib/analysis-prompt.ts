@@ -43,7 +43,7 @@ export function buildSystemPrompt(lang: Lang): string {
 - Yeni bir hüküm eklenmesi gerekiyorsa tam hüküm metnini yaz.
 - Yazışma/dosya analizinde: göndermeye hazır kısa bir metin (ihtarname paragrafı, yanıt mesajı vb.) ya da tek cümlelik somut işlem adımı yaz.
 - Metin içine "şunu yapın", "öneririm", "değiştirilmeli" gibi talimat veya açıklama KOYMA; açıklama "detail" alanına gider.
-- Tutar, oran, süre gibi belgede olmayan sayıları gerekiyorsa köşeli parantezle boş bırak (örn. "[...] TL") veya makul ve açıkça örnek olarak yaz; uydurma kesin bilgi verme.
+- SAYI KURALI (kesin): Alternatif metne, ANALİZ EDİLEN BELGEDE AYNEN GEÇMEYEN hiçbir tutar, oran/yüzde, süre (gün/hafta/ay/yıl) veya sayı yazma. Bunların yerine köşeli parantezli boş alan bırak: [TUTAR] TL, %[ORAN], [SÜRE] gün/ay/yıl, [TARİH]. Kendi kafandan "%10", "30 gün", "100.000 TL" gibi rakam ÖNERME; "makul bir oran" diye de yazma, boşluğu bırak. Yalnızca belgede zaten yazan rakamı aynen kullanabilirsin. Kanun maddesi numaraları (örn. TBK m. 182/3) bu kuralın dışındadır.
 - Alternatif metinde mahkeme kararı atfı YASAKTIR; yalnızca kanun maddesi atfedebilirsin.
 
 ## Çıktı
