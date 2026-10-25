@@ -17,6 +17,13 @@ import { createClient } from "@/lib/supabase/client";
 const TEST_EMAIL = process.env.NEXT_PUBLIC_TEST_EMAIL ?? "clause.demo.review@gmail.com";
 const TEST_PASSWORD = process.env.NEXT_PUBLIC_TEST_PASSWORD ?? "ClauseDemo#2026";
 
+// OAuth buttons only appear for providers enabled in the Supabase dashboard AND
+// listed here, e.g. NEXT_PUBLIC_OAUTH_PROVIDERS=google,github. Otherwise Supabase
+// answers the redirect with "Unsupported provider: provider is not enabled".
+const OAUTH_PROVIDERS = (process.env.NEXT_PUBLIC_OAUTH_PROVIDERS ?? "")
+  .split(",")
+  .map((p) => p.trim().toLowerCase());
+
 /**
  * Login / signup. With Supabase keys in .env.local this does real auth; with
  * none it falls back to a DEMO BYPASS (submitting just enters the dashboard).
@@ -112,6 +119,9 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   }
 
   const isLogin = mode === "login";
+  const showGoogle = !isSupabaseConfigured || OAUTH_PROVIDERS.includes("google");
+  const showGithub = !isSupabaseConfigured || OAUTH_PROVIDERS.includes("github");
+  const showSocial = showGoogle || showGithub;
   const stats = appConfig.marketing.stats.slice(0, 3);
 
   return (
@@ -173,20 +183,28 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
           </div>
 
           {/* Social (decorative in demo) */}
-          <div className="grid grid-cols-2 gap-3">
-            <Button variant="outline" onClick={() => oauth("google")} className="gap-2">
-              <GoogleGlyph /> Google
-            </Button>
-            <Button variant="outline" onClick={() => oauth("github")} className="gap-2">
-              <GithubGlyph /> GitHub
-            </Button>
-          </div>
+          {showSocial && (
+            <>
+              <div className={showGoogle && showGithub ? "grid grid-cols-2 gap-3" : "grid gap-3"}>
+                {showGoogle && (
+                  <Button variant="outline" onClick={() => oauth("google")} className="gap-2">
+                    <GoogleGlyph /> Google
+                  </Button>
+                )}
+                {showGithub && (
+                  <Button variant="outline" onClick={() => oauth("github")} className="gap-2">
+                    <GithubGlyph /> GitHub
+                  </Button>
+                )}
+              </div>
 
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            {ui.orContinueWith} {ui.email.toLowerCase()}
-            <span className="h-px flex-1 bg-border" />
-          </div>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                {ui.orContinueWith} {ui.email.toLowerCase()}
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
+          )}
 
           <form onSubmit={submit} className="space-y-4">
             {!isLogin && (
