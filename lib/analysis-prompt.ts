@@ -43,7 +43,10 @@ export function buildSystemPrompt(lang: Lang): string {
 - Yeni bir hüküm eklenmesi gerekiyorsa tam hüküm metnini yaz.
 - Yazışma/dosya analizinde: göndermeye hazır kısa bir metin (ihtarname paragrafı, yanıt mesajı vb.) ya da tek cümlelik somut işlem adımı yaz.
 - Metin içine "şunu yapın", "öneririm", "değiştirilmeli" gibi talimat veya açıklama KOYMA; açıklama "detail" alanına gider.
-- SAYI KURALI (kesin): Alternatif metne, ANALİZ EDİLEN BELGEDE AYNEN GEÇMEYEN hiçbir tutar, oran/yüzde, süre (gün/hafta/ay/yıl) veya sayı yazma. Bunların yerine köşeli parantezli boş alan bırak: [TUTAR] TL, %[ORAN], [SÜRE] (birimi içinde: "[SÜRE]" yaz, yanına gün/ay/yıl ekleme), [TARİH]. Kendi kafandan "%10", "30 gün", "100.000 TL" gibi rakam ÖNERME; "makul bir oran" diye de yazma, boşluğu bırak. Yalnızca belgede zaten yazan rakamı aynen kullanabilirsin. Kanun maddesi numaraları (örn. TBK m. 182/3) bu kuralın dışındadır.
+- SAYI KURALI (kesin, iki yönlü):
+  a) Analiz edilen belgede ZATEN YAZAN tutar, oran, süre veya sayıyı alternatif metinde AYNEN koru ve kullan; kendiliğinden boşaltma. Örnek: belgede "30 gün" ve "2.000.000 TL" geçiyorsa, o rakamlara dayanan düzeltme metninde bunları aynı biçimde yazabilirsin. Belgenin kendi rakamını ve birimini (gün/ay/yıl, TL) değiştirme.
+  b) Belgede HİÇ GEÇMEYEN bir tutar, oran/yüzde veya süreyi (örn. sözleşmede olmayan "%10" cezai şart oranı, "100.000 TL", "45 gün") KESİNLİKLE kendin uydurma. Böyle bir rakam gerekiyorsa köşeli parantezli boş alan bırak: %[ORAN], [TUTAR] TL, [SÜRE], [TARİH]. "[SÜRE]" kendi başına yeterlidir; yanına gün/ay/yıl ekleme. "Makul bir oran" gibi muğlak ifadeyle de doldurma.
+  Karar vermek için sor: "Bu rakam belgede yazıyor mu?" Evet → aynen kullan. Hayır → boş alan bırak. Kanun madde numaraları (örn. TBK m. 182/3) bu kuralın dışındadır.
 - Alternatif metinde mahkeme kararı atfı YASAKTIR; yalnızca kanun maddesi atfedebilirsin.
 
 ## Çıktı

@@ -109,39 +109,91 @@ export function stripDecisionCitations(analysis: Analysis): number {
   return removed;
 }
 
+type FigureClass = "percent" | "money" | "period";
+
 /**
  * Amounts, percentages and durations (TR + EN) — the figures a model must not invent.
  * Unit suffixes are matched with a Unicode-aware lookahead (JS `\b` is ASCII-only: "gün" would miss).
  */
-const FIGURE_RES: { re: RegExp; placeholder: { tr: string; en: string } }[] = [
-  { re: /%\s?\d[\d.,]*|\d[\d.,]*\s?%/g, placeholder: { tr: "%[ORAN]", en: "[RATE]%" } },
+const FIGURE_RES: { cls: FigureClass; re: RegExp; placeholder: { tr: string; en: string } }[] = [
   {
+    cls: "percent",
+    re: /%\s?\d[\d.,]*|\d[\d.,]*\s?%|yüzde\s+\d[\d.,]*/giu,
+    placeholder: { tr: "%[ORAN]", en: "[RATE]%" },
+  },
+  {
+    cls: "money",
     re: /\d[\d.,]*\s?(?:TL|TRY|₺|lira|USD|EUR|€|\$)(?![\p{L}\d])/giu,
     placeholder: { tr: "[TUTAR] TL", en: "[AMOUNT]" },
   },
   {
+    cls: "period",
     re: /\d[\d.,]*\s?(?:gün|hafta|ay|yıl|saat|days?|weeks?|months?|years?|hours?)(?![\p{L}\d])/giu,
     placeholder: { tr: "[SÜRE]", en: "[PERIOD]" },
   },
 ];
 
-const digitRuns = (s: string) => (s.match(/\d+/g) ?? []).map((d) => d.replace(/^0+(?=\d)/, ""));
+/** "2.000.000,00" / "2,000,000.50" / "50.000" → 2000000 / 2000000.5 / 50000. */
+function parseFigureNumber(token: string): number | null {
+  let t = token.replace(/[.,]+$/, "");
+  // A last separator followed by 1–2 digits is a decimal part ("12,5", "2.000.000,00"); 3 digits = thousands group.
+  const dec = t.match(/[.,](\d{1,2})$/);
+  let frac = "";
+  if (dec) {
+    frac = dec[1];
+    t = t.slice(0, -dec[0].length);
+  }
+  const n = Number(t.replace(/[.,]/g, "") + (frac ? `.${frac}` : ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+const UNIT_ROOT: [RegExp, string][] = [
+  [/^(gün|day)/i, "d"],
+  [/^(hafta|week)/i, "w"],
+  [/^(ay|month)/i, "m"],
+  [/^(yıl|year)/i, "y"],
+  [/^(saat|hour)/i, "h"],
+];
+
+/** Canonical key of one matched figure: percent/money → value; period → value + unit. */
+function figureKey(cls: FigureClass, match: string): string | null {
+  const num = match.match(/\d[\d.,]*/)?.[0];
+  if (!num) return null;
+  const value = parseFigureNumber(num);
+  if (value === null) return null;
+  if (cls !== "period") return `${cls}:${value}`;
+  const unit = match.slice(match.indexOf(num) + num.length).trim();
+  const root = UNIT_ROOT.find(([re]) => re.test(unit))?.[1];
+  return root ? `period:${value}${root}` : null;
+}
+
+/** Every figure the source document itself states, as canonical keys. */
+function sourceFigureKeys(source: string): Set<string> {
+  const keys = new Set<string>();
+  for (const { cls, re } of FIGURE_RES) {
+    for (const m of source.matchAll(new RegExp(re.source, re.flags))) {
+      const k = figureKey(cls, m[0]);
+      if (k) keys.add(k);
+    }
+  }
+  return keys;
+}
 
 /**
- * Replaces amounts/percentages/durations in proposed clause text that do not appear in the
- * analysed document with an empty placeholder. Returns the number of figures replaced.
+ * In proposed clause text, keeps any amount/percentage/duration the source document itself
+ * states (same value and, for durations, same unit) and blanks the rest with an empty
+ * placeholder. Returns how many invented figures were replaced.
  */
 export function blankInventedFigures(analysis: Analysis, source: string, lang: "tr" | "en"): number {
-  const sourceDigitRuns = new Set(digitRuns(source));
+  const known = sourceFigureKeys(source);
   let replaced = 0;
   const fix = (text: string | undefined) => {
     if (!text) return text;
     let out = text;
-    for (const { re, placeholder } of FIGURE_RES) {
+    for (const { cls, re, placeholder } of FIGURE_RES) {
       out = out.replace(re, (m) => {
-        // Keep a figure only if every digit-run in it occurs in the source document.
-        const runs = digitRuns(m);
-        if (runs.length > 0 && runs.every((r) => sourceDigitRuns.has(r))) return m;
+        const key = figureKey(cls, m);
+        if (key && known.has(key)) return m; // stated in the document → safe to reuse verbatim
         replaced++;
         return placeholder[lang];
       });
