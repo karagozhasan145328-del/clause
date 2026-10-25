@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { UploadButton } from "@/components/app/upload-button";
 import {
-  Upload,
   Search,
   Filter,
   ArrowUpDown,
@@ -73,10 +73,7 @@ export default function DashboardPage() {
                 <BookMarked className="h-4 w-4 text-muted-foreground" />
                 {lang === "tr" ? "Analiz kriterleri" : "Criteria"}
               </button>
-              <button className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90">
-                <Upload className="h-3.5 w-3.5" />
-                {lang === "tr" ? "Dosya yükle" : "Upload case"}
-              </button>
+              <UploadButton />
             </div>
           </div>
 

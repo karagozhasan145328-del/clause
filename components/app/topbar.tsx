@@ -1,14 +1,15 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Bell, Upload } from "lucide-react";
+import { Bell } from "lucide-react";
+import { UploadButton } from "@/components/app/upload-button";
 import appConfig from "@/app.config";
 import { LanguageToggle } from "@/components/ui/language-toggle";
 import { useLang } from "@/components/i18n/language-provider";
 
 export function Topbar() {
   const pathname = usePathname();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const current =
     appConfig.nav.find((n) => pathname === n.href || pathname.startsWith(n.href + "/")) ??
     appConfig.navGroups.flatMap((g) => g.items).find((n) => pathname === n.href || pathname.startsWith(n.href + "/"));
@@ -20,10 +21,7 @@ export function Topbar() {
       </span>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <button className="hidden h-9 items-center gap-2 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 sm:inline-flex">
-          <Upload className="h-3.5 w-3.5" />
-          {lang === "tr" ? "Dosya yükle" : "Upload case"}
-        </button>
+        <UploadButton className="hidden sm:inline-flex" />
         <LanguageToggle className="mr-1" />
         <button
           aria-label="Notifications"

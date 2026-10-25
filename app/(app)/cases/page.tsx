@@ -8,7 +8,9 @@
    ───────────────────────────────────────────────────────────────────────────── */
 
 import { useMemo, useState } from "react";
-import { Upload, Search, Filter, TriangleAlert, FolderSearch } from "lucide-react";
+import { SavedAnalyses } from "@/components/app/saved-analyses";
+import { UploadButton } from "@/components/app/upload-button";
+import { Search, Filter, TriangleAlert, FolderSearch } from "lucide-react";
 import { ExecutiveSummaryCard } from "@/components/app/report-viewer";
 import { useLang } from "@/components/i18n/language-provider";
 import { cn } from "@/lib/utils";
@@ -61,10 +63,11 @@ export default function CasesPage() {
               : "Every case is scanned for contradictions, risk-scored, and audited against your analysis criteria."}
           </p>
         </div>
-        <button className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90">
-          <Upload className="h-3.5 w-3.5" />
-          {lang === "tr" ? "Dosya yükle" : "Upload case"}
-        </button>
+        <UploadButton className="ml-auto" />
+      </div>
+
+      <div className="mt-6">
+        <SavedAnalyses />
       </div>
 
       <div className={cn("mt-6 grid gap-6", selected ? "xl:grid-cols-[1fr_390px]" : "grid-cols-1")}>
