@@ -5,7 +5,7 @@ export type FindingSeverity = "critical" | "medium" | "low";
 export interface Finding {
   /** Clause / issue heading (madde başlığı). */
   title: string;
-  /** critical | medium | low (legacy rows may also hold "high"). */
+  /** critical | medium | low. (Legacy rows may hold "high"; it is shown as critical.) */
   severity: string;
   detail: string;
   evidence?: string;
@@ -37,33 +37,33 @@ export interface AnalysisRow {
   created_at: string;
 }
 
-const LEVELS: RiskLevel[] = ["low", "medium", "high", "critical"];
+/** Product-level scale: exactly three levels. */
+export const LEVELS3: FindingSeverity[] = ["critical", "medium", "low"];
 
-/** Models occasionally return odd casing/values — coerce to a valid enum. */
-export const normalizeRisk = (v: unknown): RiskLevel => {
-  const s = String(v ?? "").toLowerCase() as RiskLevel;
-  return LEVELS.includes(s) ? s : "medium";
-};
-
-/** Display/sort order, most severe first. Unknown values sort last. */
-export const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-
-const SEVERITY_ALIASES: Record<string, FindingSeverity | "high"> = {
+const SEVERITY_ALIASES: Record<string, FindingSeverity> = {
   critical: "critical", kritik: "critical",
-  high: "high", yüksek: "high", yuksek: "high",
-  medium: "medium", orta: "medium",
+  // Intermediate values the model may still emit are folded UP (conservative for a lawyer).
+  high: "critical", yüksek: "critical", yuksek: "critical", "very high": "critical",
+  medium: "medium", orta: "medium", moderate: "medium",
   low: "low", düşük: "low", dusuk: "low",
 };
 
-export const normalizeSeverity = (v: unknown): FindingSeverity | "high" =>
+/** Coerces any model/legacy value to critical | medium | low. Unknown → medium. */
+export const normalizeSeverity = (v: unknown): FindingSeverity =>
   SEVERITY_ALIASES[String(v ?? "").trim().toLowerCase()] ?? "medium";
+
+/** Overall risk uses the same 3-level scale (stored value is a valid RiskLevel for the DB check). */
+export const normalizeRisk = (v: unknown): RiskLevel => normalizeSeverity(v);
+
+/** Display/sort order, most severe first. */
+export const SEVERITY_RANK: Record<FindingSeverity, number> = { critical: 0, medium: 1, low: 2 };
 
 /**
  * Court-decision citations the model must never produce (it cannot verify them).
  * Matches e.g. "Yargıtay 3. HD, E. 2019/123 K. 2020/456", "11. Hukuk Dairesi", "YHGK".
  */
 const DECISION_RE =
-  /(yargıtay|danıştay|anayasa mahkemesi|aym|yhgk|ybgk|\b\d{1,2}\.\s*(hukuk|ceza)\s*dairesi|\b\d{1,2}\.\s*(hd|cd)\b|\bE\.?\s*\d{4}\s*\/\s*\d+|\bK\.?\s*\d{4}\s*\/\s*\d+)/i;
+  /(yargıtay|danıştay|anayasa mahkemesi|\baym\b|yhgk|ybgk|\b\d{1,2}\.\s*(hukuk|ceza)\s*dairesi|\b\d{1,2}\.\s*(hd|cd)\b|\bE\.?\s*\d{4}\s*\/\s*\d+|\bK\.?\s*\d{4}\s*\/\s*\d+)/i;
 
 const REDACTED = "[emsal karar — doğrulanmadan kullanmayın]";
 
@@ -121,7 +121,7 @@ export function sanitizeAnalysis(raw: Partial<Analysis>): Analysis {
       legalBasis: strs(f?.legalBasis),
       suggestedFix: str(f?.suggestedFix) || undefined,
     }))
-    .sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
+    .sort((a, b) => SEVERITY_RANK[a.severity as FindingSeverity] - SEVERITY_RANK[b.severity as FindingSeverity]);
 
   const analysis: Analysis = {
     summary: str(raw.summary),

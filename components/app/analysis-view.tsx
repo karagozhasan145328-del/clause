@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, Copy, ShieldAlert } from "lucide-react";
 import { useLang } from "@/components/i18n/language-provider";
 import { RISK_META, riskLabel } from "@/lib/risk";
-import { SEVERITY_RANK, normalizeRisk, normalizeSeverity, type Analysis, type Finding } from "@/lib/analysis";
+import { LEVELS3, SEVERITY_RANK, normalizeSeverity, type Analysis, type Finding } from "@/lib/analysis";
 
 /** Renders a stored/returned analysis: findings ranked most-severe first, with legal basis and a suggested fix. */
 export function AnalysisView({ result }: { result: Analysis }) {
@@ -13,14 +13,16 @@ export function AnalysisView({ result }: { result: Analysis }) {
 
   // Re-sort here too: rows saved before the sorted schema (or by older code) may be unordered.
   const findings = [...(result.findings ?? [])].sort(
-    (a, b) => (SEVERITY_RANK[normalizeSeverity(a.severity)] ?? 9) - (SEVERITY_RANK[normalizeSeverity(b.severity)] ?? 9),
+    (a, b) => SEVERITY_RANK[normalizeSeverity(a.severity)] - SEVERITY_RANK[normalizeSeverity(b.severity)],
   );
-  const overall = normalizeRisk(result.overallRisk);
+  const overall = normalizeSeverity(result.overallRisk);
   const counts = findings.reduce<Record<string, number>>((acc, f) => {
     const k = normalizeSeverity(f.severity);
     acc[k] = (acc[k] ?? 0) + 1;
     return acc;
   }, {});
+
+  const fixes = findings.map((f) => f.suggestedFix?.trim()).filter((x): x is string => Boolean(x));
 
   return (
     <div className="space-y-5 text-sm">
@@ -29,7 +31,7 @@ export function AnalysisView({ result }: { result: Analysis }) {
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase ${RISK_META[overall].cls}`}>
           {riskLabel(overall, lang)}
         </span>
-        {(["critical", "high", "medium", "low"] as const).map((k) =>
+        {LEVELS3.map((k) =>
           counts[k] ? (
             <span key={k} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${RISK_META[k].cls}`}>
               {counts[k]} {riskLabel(k, lang)}
@@ -51,9 +53,18 @@ export function AnalysisView({ result }: { result: Analysis }) {
 
       {findings.length > 0 && (
         <div>
-          <h3 className="label-mono mb-2 text-muted-foreground">
-            {tr ? `Bulgular · öncelik sırasıyla (${findings.length})` : `Findings · by priority (${findings.length})`}
-          </h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="label-mono text-muted-foreground">
+              {tr ? `Bulgular · öncelik sırasıyla (${findings.length})` : `Findings · by priority (${findings.length})`}
+            </h3>
+            {fixes.length > 0 && (
+              <CopyButton
+                text={fixes.join("\n\n")}
+                label={tr ? `Tüm madde önerilerini kopyala (${fixes.length})` : `Copy all clause proposals (${fixes.length})`}
+                tr={tr}
+              />
+            )}
+          </div>
           <ol className="space-y-3">
             {findings.map((f, i) => (
               <FindingCard key={i} finding={f} rank={i + 1} tr={tr} lang={lang} />
@@ -104,19 +115,21 @@ function FindingCard({ finding: f, rank, tr, lang }: { finding: Finding; rank: n
       )}
 
       {f.suggestedFix && (
-        <div className="mt-2.5 rounded-lg bg-primary/5 p-2.5">
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="label-mono text-primary">{tr ? "Önerilen düzeltme" : "Suggested fix"}</span>
+        <div className="mt-2.5 rounded-lg border border-primary/25 bg-primary/5 p-2.5">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="label-mono text-primary">{tr ? "Alternatif madde metni" : "Replacement clause text"}</span>
             <CopyButton text={f.suggestedFix} tr={tr} />
           </div>
-          <p className="whitespace-pre-wrap text-[13px]">{f.suggestedFix}</p>
+          <p className="select-all whitespace-pre-wrap rounded-md bg-background/70 p-2 font-serif text-[13px] leading-relaxed">
+            {f.suggestedFix}
+          </p>
         </div>
       )}
     </li>
   );
 }
 
-function CopyButton({ text, tr }: { text: string; tr: boolean }) {
+function CopyButton({ text, tr, label }: { text: string; tr: boolean; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -130,7 +143,7 @@ function CopyButton({ text, tr }: { text: string; tr: boolean }) {
       className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
     >
       {done ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      {done ? (tr ? "Kopyalandı" : "Copied") : tr ? "Kopyala" : "Copy"}
+      {done ? (tr ? "Kopyalandı" : "Copied") : (label ?? (tr ? "Kopyala" : "Copy"))}
     </button>
   );
 }
