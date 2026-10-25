@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { normalizeRisk, type Analysis } from "@/lib/analysis";
+import { sanitizeAnalysis, type Analysis } from "@/lib/analysis";
+import { buildSystemPrompt } from "@/lib/analysis-prompt";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,11 +45,7 @@ export async function POST(request: Request) {
   const text = (await file.text()).slice(0, MAX_CHARS).trim();
   if (!text) return err("empty", "The file is empty.", 400);
 
-  const system = `You are a legal-risk analyst. Analyze the uploaded case material (typically a WhatsApp chat export or case document). Respond with JSON only, in ${
-    lang === "tr" ? "Turkish" : "English"
-  }, matching exactly:
-{"summary": string, "overallRisk": "low"|"medium"|"high"|"critical", "findings": [{"title": string, "severity": "low"|"medium"|"high"|"critical", "detail": string, "evidence": string}], "contradictions": [string], "recommendations": [string]}
-Only report what is supported by the text; quote short evidence. Do not invent facts.`;
+  const system = buildSystemPrompt(lang);
 
   let res: Response;
   try {
@@ -79,11 +76,10 @@ Only report what is supported by the text; quote short evidence. Do not invent f
   let analysis: Analysis;
   try {
     const json = await res.json();
-    analysis = JSON.parse(json.choices?.[0]?.message?.content ?? "");
+    analysis = sanitizeAnalysis(JSON.parse(json.choices?.[0]?.message?.content ?? ""));
   } catch {
     return err("bad_model_output", "The model returned an unreadable response. Try again.", 502);
   }
-  analysis.overallRisk = normalizeRisk(analysis.overallRisk);
 
   // Persist (best effort): the analysis is still returned if saving fails.
   let saved: { id: string } | null = null;
