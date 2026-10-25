@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const user = supabase ? (await supabase.auth.getUser()).data.user : null;
   if (supabase && !user) return err("unauthorized", "Sign in to analyze a case.", 401);
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY?.replace(/^﻿/, "").trim();
   if (!apiKey) {
     return err("no_key", "OPENAI_API_KEY is not set in .env.local — add it and restart the dev server.", 503);
   }
