@@ -12,6 +12,7 @@ import { Input, Label } from "@/components/ui/input";
 import { LanguageToggle } from "@/components/ui/language-toggle";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/client";
+import { authErrorMessage } from "@/lib/auth-errors";
 
 // Shared review account for instructors/testers (public by design, no real data).
 const TEST_EMAIL = process.env.NEXT_PUBLIC_TEST_EMAIL ?? "clause.demo.review@gmail.com";
@@ -61,7 +62,7 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     if (isLogin) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        setMessage({ kind: "error", text: error.status === 400 ? ui.authInvalid : ui.authError });
+        setMessage({ kind: "error", text: authErrorMessage(error, lang, ui.authError) });
         setLoading(false);
         return;
       }
@@ -80,7 +81,17 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     });
     setLoading(false);
     if (error) {
-      setMessage({ kind: "error", text: ui.authError });
+      setMessage({ kind: "error", text: authErrorMessage(error, lang, ui.authError) });
+      return;
+    }
+    // With e-mail confirmation on, an existing address comes back as a user with no identities.
+    if (data.user && data.user.identities?.length === 0) {
+      setMessage({
+        kind: "error",
+        text: lang === "tr"
+          ? "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı dene."
+          : "An account with this email already exists. Try signing in instead.",
+      });
       return;
     }
     if (data.session) {
@@ -100,7 +111,7 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
       password: TEST_PASSWORD,
     });
     if (error) {
-      setMessage({ kind: "error", text: ui.authError });
+      setMessage({ kind: "error", text: authErrorMessage(error, lang, ui.authError) });
       setLoading(false);
       return;
     }
