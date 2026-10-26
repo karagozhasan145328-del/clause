@@ -13,6 +13,7 @@ const err = (code: string, message: string, status: number) =>
   NextResponse.json({ error: code, message }, { status });
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   // Auth: only enforced once Supabase is connected (demo mode stays open).
   const supabase = isSupabaseConfigured ? await createClient() : null;
   const user = supabase ? (await supabase.auth.getUser()).data.user : null;
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
   // Read text out of TXT / PDF / DOCX. Failures carry a user-safe code + message (scanned PDF, password, legacy .doc…).
   let extracted;
   try {
-    extracted = await extractText(file);
+    extracted = await extractText(file, { ocr: form.get("ocr") === "1", apiKey });
   } catch (e) {
     if (e instanceof ExtractError) return err(e.code, e.message, e.status);
     console.error("Text extraction failed:", e);
@@ -62,7 +63,8 @@ export async function POST(request: Request) {
           { role: "user", content: text },
         ],
       }),
-      signal: AbortSignal.timeout(55_000),
+      // Whatever OCR already used comes off the 60 s function budget (min 12 s so the call can still finish).
+      signal: AbortSignal.timeout(Math.max(12_000, 55_000 - (Date.now() - startedAt))),
     });
   } catch {
     return err("upstream_unreachable", "Could not reach OpenAI (timeout or network).", 504);
@@ -81,6 +83,8 @@ export async function POST(request: Request) {
   } catch {
     return err("bad_model_output", "The model returned an unreadable response. Try again.", 502);
   }
+  // Saved with the result so the UI can warn that the text came from OCR and may contain misreadings.
+  if (extracted.ocr) analysis.ocr = true;
 
   // Persist (best effort): the analysis is still returned if saving fails.
   let saved: { id: string } | null = null;
@@ -118,6 +122,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     fileName: file.name,
     truncated: extracted.truncated,
+    ocr: extracted.ocr ?? false,
     kind: extracted.kind,
     missingPages: extracted.missingPages ?? null,
     analysis,

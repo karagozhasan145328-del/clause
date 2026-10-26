@@ -23,9 +23,13 @@ const ERRORS: Record<string, Msg> = {
   corrupt: { tr: "Dosya okunamadı; bozuk olabilir ya da uzantısı içeriğiyle uyuşmuyor.", en: "The file couldn't be read; it may be damaged or its extension doesn't match its content." },
   password_protected: { tr: "Dosya şifreli. Şifreyi kaldırıp tekrar yükle.", en: "The file is password-protected. Remove the password and upload again." },
   scanned_pdf: {
-    tr: "Bu PDF taranmış bir görüntü gibi görünüyor (seçilebilir metin yok), bu yüzden analiz edilemedi. Önce OCR uygula (ör. Adobe Acrobat'ta “Tara ve OCR”) ya da metin tabanlı PDF / .docx yükle.",
-    en: "This PDF looks like a scan (no selectable text), so it couldn't be analyzed. Run OCR first (e.g. “Scan & OCR” in Adobe Acrobat) or upload a text-based PDF / .docx.",
+    tr: "Bu PDF taranmış bir görüntü gibi görünüyor (seçilebilir metin yok). OCR ile okutabilirsin.",
+    en: "This PDF looks like a scan (no selectable text). You can have it read with OCR.",
   },
+  ocr_too_many_pages: { tr: "OCR en fazla 20 sayfalık dosyaları destekliyor. PDF'i bölüp ilgili kısmı yükle.", en: "OCR supports files of up to 20 pages. Split the PDF and upload the relevant part." },
+  ocr_timeout: { tr: "OCR çok uzun sürdü. Daha az sayfalı bir dosya dene.", en: "OCR took too long. Try a file with fewer pages." },
+  ocr_failed: { tr: "OCR servisine ulaşılamadı veya hata verdi. Biraz sonra tekrar dene.", en: "The OCR service failed or was unreachable. Try again shortly." },
+  ocr_empty: { tr: "Taranmış sayfalarda okunabilir metin tanınamadı. Tarama kalitesi düşük olabilir.", en: "No readable text could be recognized in the scan. The scan quality may be too low." },
   too_many_pages: { tr: "PDF 300 sayfadan uzun. İlgili bölümü ayırıp yükle.", en: "The PDF is longer than 300 pages. Split it and upload the relevant part." },
   empty: { tr: "Dosyada okunabilir metin bulunamadı.", en: "No readable text was found in the file." },
   extract_failed: { tr: "Dosya okunamadı. Başka bir biçimde dene.", en: "The file couldn't be read. Try another format." },
@@ -47,8 +51,12 @@ export function UploadButton({ className }: { className?: string }) {
   const [result, setResult] = useState<Analysis | null>(null);
   const [meta, setMeta] = useState<Meta>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [needsOcr, setNeedsOcr] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [lastFile, setLastFile] = useState<File | null>(null);
 
   function reset() {
+    setNeedsOcr(false);
     setError(null);
     setResult(null);
     setMeta({});
@@ -56,10 +64,12 @@ export function UploadButton({ className }: { className?: string }) {
     setFileName("");
   }
 
-  async function onFile(file: File | undefined) {
+  async function onFile(file: File | undefined, ocr = false) {
     if (!file) return;
+    setLastFile(file);
     setOpen(true);
     reset();
+    setOcrBusy(ocr);
     setFileName(file.name);
 
     // Fast client-side checks (the server re-validates everything).
@@ -72,12 +82,14 @@ export function UploadButton({ className }: { className?: string }) {
     const body = new FormData();
     body.append("file", file);
     body.append("lang", lang);
+    if (ocr) body.append("ocr", "1"); // explicit opt-in: a scanned PDF is then read by OpenAI
     try {
       const res = await fetch("/api/analyze", { method: "POST", body });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         const known = data?.error ? ERRORS[data.error as string] : undefined;
         setError(known ? l(known) : (data?.message ?? (tr ? "Analiz başarısız oldu." : "Analysis failed.")));
+        if (data?.error === "scanned_pdf") setNeedsOcr(true);
       } else {
         setResult(data.analysis);
         setMeta({ truncated: data.truncated, missingPages: data.missingPages });
@@ -88,6 +100,7 @@ export function UploadButton({ className }: { className?: string }) {
       setError(tr ? "Sunucuya ulaşılamadı." : "Could not reach the server.");
     } finally {
       setBusy(false);
+      setOcrBusy(false);
       if (inputRef.current) inputRef.current.value = ""; // allow re-selecting the same file
     }
   }
@@ -166,8 +179,8 @@ export function UploadButton({ className }: { className?: string }) {
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {tr
-                    ? "PDF, Word (.docx), .txt, .md, .csv, .json · en fazla 4 MB · taranmış PDF'ler için önce OCR gerekir"
-                    : "PDF, Word (.docx), .txt, .md, .csv, .json · up to 4 MB · scanned PDFs need OCR first"}
+                    ? "PDF, Word (.docx), .txt, .md, .csv, .json · en fazla 4 MB · taranmış PDF'ler için OCR seçeneği sunulur"
+                    : "PDF, Word (.docx), .txt, .md, .csv, .json · up to 4 MB · OCR is offered for scanned PDFs"}
                 </p>
               </div>
             )}
@@ -175,13 +188,35 @@ export function UploadButton({ className }: { className?: string }) {
             {busy && (
               <p className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                {tr ? "Dosya okunuyor ve analiz ediliyor…" : "Reading and analyzing the file…"}
+                {ocrBusy
+                  ? tr
+                    ? "Taranmış sayfalar OCR ile okunuyor, ardından analiz ediliyor… (30-60 sn sürebilir)"
+                    : "Reading the scanned pages with OCR, then analyzing… (can take 30-60 s)"
+                  : tr
+                    ? "Dosya okunuyor ve analiz ediliyor…"
+                    : "Reading and analyzing the file…"}
               </p>
             )}
             {error && (
               <p role="alert" className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
                 {error}
               </p>
+            )}
+            {needsOcr && lastFile && (
+              <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3">
+                <button
+                  type="button"
+                  onClick={() => void onFile(lastFile, true)}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  {tr ? "OCR ile oku ve analiz et" : "Read with OCR and analyze"}
+                </button>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {tr
+                    ? "Gizlilik: OCR için PDF'in sayfaları OpenAI'ye gönderilir (yurt dışına aktarım). Müvekkil verisi içeriyorsa KVKK yükümlülüklerinizi değerlendirin. En fazla 20 sayfa. OCR hata yapabilir; sonucu orijinal belgeyle karşılaştırın."
+                    : "Privacy: for OCR the PDF pages are sent to OpenAI (cross-border transfer). If it contains client data, assess your KVKK obligations. Up to 20 pages. OCR can misread; compare the result with the original."}
+                </p>
+              </div>
             )}
             {saveError && (
               <p className="mt-4 rounded-lg border border-border bg-muted p-3 text-xs">

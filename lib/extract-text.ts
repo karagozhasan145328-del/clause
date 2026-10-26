@@ -4,6 +4,8 @@
  * so a renamed or corrupt file is rejected with a clear reason instead of being fed to a parser.
  */
 
+import { OCR_MAX_PAGES, OcrError, ocrPdf } from "@/lib/ocr";
+
 export type FileKind = "text" | "pdf" | "docx";
 
 export const TEXT_EXT = [".txt", ".md", ".csv", ".json", ".log"];
@@ -23,6 +25,10 @@ export type ExtractErrorCode =
   | "password_protected"
   | "scanned_pdf"
   | "too_many_pages"
+  | "ocr_too_many_pages"
+  | "ocr_failed"
+  | "ocr_timeout"
+  | "ocr_empty"
   | "empty";
 
 export class ExtractError extends Error {
@@ -42,6 +48,14 @@ export interface Extracted {
   truncated: boolean;
   /** PDF only: pages without selectable text (likely scanned) out of the total. */
   missingPages?: { missing: number; total: number };
+  /** True when the text came from OCR of a scanned PDF (may contain misreadings). */
+  ocr?: boolean;
+}
+
+export interface ExtractOptions {
+  /** The user explicitly agreed to send a scanned PDF to OCR (it is processed by OpenAI). */
+  ocr?: boolean;
+  apiKey?: string;
 }
 
 const startsWith = (b: Uint8Array, sig: number[]) => sig.every((v, i) => b[i] === v);
@@ -76,7 +90,11 @@ export function detectKind(name: string, bytes: Uint8Array): FileKind {
   throw new ExtractError("unsupported", "Unsupported file type. Use .pdf, .docx, .txt, .md, .csv or .json.", 415);
 }
 
-async function extractPdf(bytes: Uint8Array): Promise<{ text: string; missingPages?: Extracted["missingPages"] }> {
+async function extractPdf(
+  bytes: Uint8Array,
+  fileName: string,
+  opts: ExtractOptions,
+): Promise<{ text: string; missingPages?: Extracted["missingPages"]; ocr?: boolean }> {
   const { getDocumentProxy, extractText } = await import("unpdf");
   let pages: string[];
   try {
@@ -102,10 +120,22 @@ async function extractPdf(bytes: Uint8Array): Promise<{ text: string; missingPag
   const chars = clean.reduce((n, p) => n + p.length, 0);
 
   if (chars / total < MIN_CHARS_PER_PAGE) {
-    throw new ExtractError(
-      "scanned_pdf",
-      "This PDF looks like a scan (images without selectable text), so there is nothing to analyze. Run OCR first (e.g. 'Scan & OCR' in Adobe Acrobat) or upload a text-based PDF / .docx.",
-    );
+    // Scanned: only OCR when the user opted in (the file is then processed by OpenAI).
+    if (!opts.ocr || !opts.apiKey) {
+      throw new ExtractError(
+        "scanned_pdf",
+        "This PDF looks like a scan (images without selectable text). Choose OCR to read it, or upload a text-based PDF / .docx.",
+      );
+    }
+    if (total > OCR_MAX_PAGES) {
+      throw new ExtractError("ocr_too_many_pages", `OCR supports up to ${OCR_MAX_PAGES} pages per file. Split the PDF and upload the relevant part.`, 413);
+    }
+    try {
+      return { text: await ocrPdf(bytes, fileName, opts.apiKey), ocr: true };
+    } catch (e) {
+      if (e instanceof OcrError) throw new ExtractError(e.code, e.message, e.status);
+      throw e;
+    }
   }
 
   return {
@@ -125,27 +155,29 @@ async function extractDocx(bytes: Uint8Array): Promise<string> {
 }
 
 /** Reads an uploaded file and returns its plain text. Throws ExtractError with a user-safe message. */
-export async function extractText(file: File): Promise<Extracted> {
+export async function extractText(file: File, opts: ExtractOptions = {}): Promise<Extracted> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const kind = detectKind(file.name, bytes);
 
   let text = "";
   let missingPages: Extracted["missingPages"];
+  let ocr = false;
   if (kind === "text") {
     text = new TextDecoder("utf-8").decode(bytes);
   } else if (kind === "docx") {
     text = await extractDocx(bytes);
   } else {
-    const r = await extractPdf(bytes);
+    const r = await extractPdf(bytes, file.name, opts);
     text = r.text;
     missingPages = r.missingPages;
+    ocr = Boolean(r.ocr);
   }
 
   text = text.replace(/^﻿/, "").trim();
   if (!text) throw new ExtractError("empty", "No readable text was found in the file.");
 
   const truncated = text.length > MAX_CHARS;
-  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages };
+  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages, ocr };
 }
 
 export const CONTENT_TYPE: Record<FileKind, string> = {

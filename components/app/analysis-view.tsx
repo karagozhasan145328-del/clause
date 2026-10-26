@@ -51,6 +51,15 @@ export function AnalysisView({ result }: { result: Analysis }) {
         </p>
       ) : null}
 
+      {result.ocr ? (
+        <p className="flex items-start gap-2 rounded-lg bg-warning/15 px-3 py-2 text-xs text-warning-foreground">
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {tr
+            ? "Bu belge taranmış PDF'ten OCR ile okundu. Rakam, isim ve tarihlerde okuma hatası olabilir; alıntıları ve tutarları orijinal belgeyle karşılaştırın."
+            : "This document was read from a scanned PDF via OCR. Digits, names and dates may be misread; compare quotes and amounts with the original."}
+        </p>
+      ) : null}
+
       {result.blankedFigures ? (
         <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
           {tr

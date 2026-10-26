@@ -26,6 +26,8 @@ export interface Analysis {
   removedCitations?: number;
   /** Figures in proposed text that were not in the document and were replaced by placeholders. */
   blankedFigures?: number;
+  /** The source text came from OCR of a scanned PDF, so quotes may contain misreadings. */
+  ocr?: boolean;
 }
 
 /** A row of the public.analyses table. */
