@@ -4,7 +4,7 @@
  * so a renamed or corrupt file is rejected with a clear reason instead of being fed to a parser.
  */
 
-import { OCR_MAX_PAGES, OcrError, ocrPdf } from "@/lib/ocr";
+import { OCR_MAX_PAGES, OcrError, joinOcrPages, ocrPdf, splitOcrPages } from "@/lib/ocr";
 
 export type FileKind = "text" | "pdf" | "docx";
 
@@ -48,8 +48,10 @@ export interface Extracted {
   truncated: boolean;
   /** PDF only: pages without selectable text (likely scanned) out of the total. */
   missingPages?: { missing: number; total: number };
-  /** True when the text came from OCR of a scanned PDF (may contain misreadings). */
+  /** True when (part of) the text came from OCR of a scanned PDF (may contain misreadings). */
   ocr?: boolean;
+  /** How many pages were read via OCR (partly scanned PDFs). */
+  ocrPages?: number;
 }
 
 export interface ExtractOptions {
@@ -94,7 +96,7 @@ async function extractPdf(
   bytes: Uint8Array,
   fileName: string,
   opts: ExtractOptions,
-): Promise<{ text: string; missingPages?: Extracted["missingPages"]; ocr?: boolean }> {
+): Promise<{ text: string; missingPages?: Extracted["missingPages"]; ocr?: boolean; ocrPages?: number }> {
   const { getDocumentProxy, extractText } = await import("unpdf");
   let pages: string[];
   try {
@@ -116,7 +118,6 @@ async function extractPdf(
 
   const clean = pages.map((p) => p.replace(/\s+/g, " ").trim());
   const total = clean.length || 1;
-  const withText = clean.filter((p) => p.length >= MIN_CHARS_PER_PAGE).length;
   const chars = clean.reduce((n, p) => n + p.length, 0);
 
   if (chars / total < MIN_CHARS_PER_PAGE) {
@@ -131,17 +132,54 @@ async function extractPdf(
       throw new ExtractError("ocr_too_many_pages", `OCR supports up to ${OCR_MAX_PAGES} pages per file. Split the PDF and upload the relevant part.`, 413);
     }
     try {
-      return { text: await ocrPdf(bytes, fileName, opts.apiKey), ocr: true };
+      return { text: joinOcrPages(await ocrPdf(bytes, fileName, opts.apiKey)), ocr: true };
     } catch (e) {
       if (e instanceof OcrError) throw new ExtractError(e.code, e.message, e.status);
       throw e;
     }
   }
 
-  return {
-    text: clean.join("\n\n"),
-    missingPages: withText < total ? { missing: total - withText, total } : undefined,
-  };
+  const missingIdx = clean.flatMap((p, i) => (p.length < MIN_CHARS_PER_PAGE ? [i] : []));
+  if (missingIdx.length === 0) return { text: clean.join("\n\n") };
+
+  // Partly scanned: without opt-in, analyze the pages that have text and report how many are missing.
+  if (!opts.ocr || !opts.apiKey) {
+    return { text: clean.join("\n\n"), missingPages: { missing: missingIdx.length, total } };
+  }
+  if (missingIdx.length > OCR_MAX_PAGES) {
+    throw new ExtractError("ocr_too_many_pages", `OCR supports up to ${OCR_MAX_PAGES} scanned pages per file. This PDF has ${missingIdx.length}.`, 413);
+  }
+
+  // OCR only the scanned pages (cheaper, and digital pages stay exact), then put each back in page order.
+  try {
+    const sub = await pdfSubset(bytes, missingIdx);
+    const ocrPages = splitOcrPages(await ocrPdf(sub, fileName, opts.apiKey));
+    const aligned = ocrPages.length === missingIdx.length;
+    const merged = clean.map((p, i) => {
+      const k = missingIdx.indexOf(i);
+      return k === -1 ? p : aligned ? ocrPages[k] : p;
+    });
+    // If the model returned a different number of pages, we can't map them reliably: append the OCR text after the digital pages.
+    if (!aligned) merged.push(ocrPages.filter(Boolean).join("\n\n"));
+    return { text: merged.filter(Boolean).join("\n\n"), ocr: true, ocrPages: missingIdx.length };
+  } catch (e) {
+    // The "missing" pages were blank (e.g. empty last page): keep the digital text instead of failing.
+    if (e instanceof OcrError && e.code === "ocr_empty") {
+      return { text: clean.join("\n\n"), missingPages: { missing: missingIdx.length, total } };
+    }
+    if (e instanceof OcrError) throw new ExtractError(e.code, e.message, e.status);
+    throw e;
+  }
+}
+
+/** A new PDF containing only the given (0-based) pages of the original, in order. */
+async function pdfSubset(bytes: Uint8Array, pageIdx: number[]): Promise<Uint8Array> {
+  const { PDFDocument } = await import("pdf-lib");
+  const src = await PDFDocument.load(bytes, { ignoreEncryption: false });
+  const out = await PDFDocument.create();
+  const pages = await out.copyPages(src, pageIdx);
+  pages.forEach((pg) => out.addPage(pg));
+  return out.save();
 }
 
 async function extractDocx(bytes: Uint8Array): Promise<string> {
@@ -162,6 +200,7 @@ export async function extractText(file: File, opts: ExtractOptions = {}): Promis
   let text = "";
   let missingPages: Extracted["missingPages"];
   let ocr = false;
+  let ocrPages: number | undefined;
   if (kind === "text") {
     text = new TextDecoder("utf-8").decode(bytes);
   } else if (kind === "docx") {
@@ -171,13 +210,14 @@ export async function extractText(file: File, opts: ExtractOptions = {}): Promis
     text = r.text;
     missingPages = r.missingPages;
     ocr = Boolean(r.ocr);
+    ocrPages = r.ocrPages;
   }
 
   text = text.replace(/^﻿/, "").trim();
   if (!text) throw new ExtractError("empty", "No readable text was found in the file.");
 
   const truncated = text.length > MAX_CHARS;
-  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages, ocr };
+  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages, ocr, ocrPages };
 }
 
 export const CONTENT_TYPE: Record<FileKind, string> = {

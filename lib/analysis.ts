@@ -28,6 +28,8 @@ export interface Analysis {
   blankedFigures?: number;
   /** The source text came from OCR of a scanned PDF, so quotes may contain misreadings. */
   ocr?: boolean;
+  /** Partly scanned PDF: how many pages were read via OCR (the rest were digital text). */
+  ocrPages?: number;
 }
 
 /** A row of the public.analyses table. */

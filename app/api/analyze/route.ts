@@ -84,7 +84,10 @@ export async function POST(request: Request) {
     return err("bad_model_output", "The model returned an unreadable response. Try again.", 502);
   }
   // Saved with the result so the UI can warn that the text came from OCR and may contain misreadings.
-  if (extracted.ocr) analysis.ocr = true;
+  if (extracted.ocr) {
+    analysis.ocr = true;
+    if (extracted.ocrPages) analysis.ocrPages = extracted.ocrPages;
+  }
 
   // Persist (best effort): the analysis is still returned if saving fails.
   let saved: { id: string } | null = null;
@@ -123,6 +126,7 @@ export async function POST(request: Request) {
     fileName: file.name,
     truncated: extracted.truncated,
     ocr: extracted.ocr ?? false,
+    ocrPages: extracted.ocrPages ?? null,
     kind: extracted.kind,
     missingPages: extracted.missingPages ?? null,
     analysis,

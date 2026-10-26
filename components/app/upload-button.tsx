@@ -203,20 +203,11 @@ export function UploadButton({ className }: { className?: string }) {
               </p>
             )}
             {needsOcr && lastFile && (
-              <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3">
-                <button
-                  type="button"
-                  onClick={() => void onFile(lastFile, true)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  {tr ? "OCR ile oku ve analiz et" : "Read with OCR and analyze"}
-                </button>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {tr
-                    ? "Gizlilik: OCR için PDF'in sayfaları OpenAI'ye gönderilir (yurt dışına aktarım). Müvekkil verisi içeriyorsa KVKK yükümlülüklerinizi değerlendirin. En fazla 20 sayfa. OCR hata yapabilir; sonucu orijinal belgeyle karşılaştırın."
-                    : "Privacy: for OCR the PDF pages are sent to OpenAI (cross-border transfer). If it contains client data, assess your KVKK obligations. Up to 20 pages. OCR can misread; compare the result with the original."}
-                </p>
-              </div>
+              <OcrOffer
+                tr={tr}
+                label={tr ? "OCR ile oku ve analiz et" : "Read with OCR and analyze"}
+                onClick={() => void onFile(lastFile, true)}
+              />
             )}
             {saveError && (
               <p className="mt-4 rounded-lg border border-border bg-muted p-3 text-xs">
@@ -230,6 +221,17 @@ export function UploadButton({ className }: { className?: string }) {
                   ? `PDF'in ${meta.missingPages.total} sayfasından ${meta.missingPages.missing} tanesinde okunabilir metin yok (taranmış olabilir). Analiz yalnızca metin içeren sayfalara dayanıyor.`
                   : `${meta.missingPages.missing} of ${meta.missingPages.total} PDF pages have no readable text (possibly scanned). The analysis only covers pages with text.`}
               </p>
+            )}
+            {meta.missingPages && lastFile && !result?.ocr && (
+              <OcrOffer
+                tr={tr}
+                label={
+                  tr
+                    ? `Taranmış ${meta.missingPages.missing} sayfayı OCR ile oku ve yeniden analiz et`
+                    : `Read the ${meta.missingPages.missing} scanned page(s) with OCR and re-analyze`
+                }
+                onClick={() => void onFile(lastFile, true)}
+              />
             )}
             {meta.truncated && (
               <p className="mt-4 rounded-lg bg-warning/15 p-3 text-xs text-warning-foreground">
@@ -255,5 +257,25 @@ export function UploadButton({ className }: { className?: string }) {
         </div>
       )}
     </>
+  );
+}
+
+/** OCR opt-in: the button plus the privacy / accuracy notice shown right next to it. */
+function OcrOffer({ tr, label, onClick }: { tr: boolean; label: string; onClick: () => void }) {
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3">
+      <button
+        type="button"
+        onClick={onClick}
+        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
+      >
+        {label}
+      </button>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {tr
+          ? "Gizlilik: OCR için taranmış sayfalar OpenAI'ye gönderilir (yurt dışına aktarım). Müvekkil verisi içeriyorsa KVKK yükümlülüklerinizi değerlendirin. En fazla 20 taranmış sayfa. Dijital metin sayfaları olduğu gibi kalır. OCR hata yapabilir; sonucu orijinal belgeyle karşılaştırın."
+          : "Privacy: for OCR the scanned pages are sent to OpenAI (cross-border transfer). If they contain client data, assess your KVKK obligations. Up to 20 scanned pages. Digital-text pages are kept as they are. OCR can misread; compare the result with the original."}
+      </p>
+    </div>
   );
 }
