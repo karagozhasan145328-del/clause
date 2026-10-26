@@ -54,6 +54,8 @@ export function UploadButton({ className }: { className?: string }) {
   const [needsOcr, setNeedsOcr] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [lastFile, setLastFile] = useState<File | null>(null);
+  /** Saved-analysis id of the current file, so an OCR re-run can replace that record. */
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   function reset() {
     setNeedsOcr(false);
@@ -67,6 +69,9 @@ export function UploadButton({ className }: { className?: string }) {
   async function onFile(file: File | undefined, ocr = false) {
     if (!file) return;
     setLastFile(file);
+    // Only an OCR re-run of the same file replaces the previous record; a new file never does.
+    const replaces = ocr && file === lastFile ? savedId : null;
+    setSavedId(null);
     setOpen(true);
     reset();
     setOcrBusy(ocr);
@@ -82,7 +87,10 @@ export function UploadButton({ className }: { className?: string }) {
     const body = new FormData();
     body.append("file", file);
     body.append("lang", lang);
-    if (ocr) body.append("ocr", "1"); // explicit opt-in: a scanned PDF is then read by OpenAI
+    if (ocr) {
+      body.append("ocr", "1"); // explicit opt-in: a scanned PDF is then read by OpenAI
+      if (replaces) body.append("replaces", replaces); // the OCR result replaces the earlier text-only analysis
+    }
     try {
       const res = await fetch("/api/analyze", { method: "POST", body });
       const data = await res.json().catch(() => null);
@@ -94,6 +102,7 @@ export function UploadButton({ className }: { className?: string }) {
         setResult(data.analysis);
         setMeta({ truncated: data.truncated, missingPages: data.missingPages });
         setSaveError(data.saveError ?? null);
+        setSavedId(data.id ?? null);
         if (data.id) window.dispatchEvent(new Event("clause:analysis-saved"));
       }
     } catch {

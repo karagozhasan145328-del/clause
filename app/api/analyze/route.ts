@@ -122,6 +122,28 @@ export async function POST(request: Request) {
     }
   }
 
+  // An OCR re-analysis replaces the earlier (text-only) analysis of the same file. Only after the new row
+  // is safely stored, only when OCR really produced the text, and only the caller's own row with the same file name.
+  let replacedId: string | null = null;
+  const replaces = String(form.get("replaces") ?? "");
+  if (supabase && user && saved && extracted.ocr && /^[0-9a-f-]{36}$/i.test(replaces) && replaces !== saved.id) {
+    const { data: old } = await supabase
+      .from("analyses")
+      .select("id, file_name, storage_path")
+      .eq("id", replaces)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (old && old.file_name === file.name) {
+      const del = await supabase.from("analyses").delete().eq("id", old.id).eq("user_id", user.id);
+      if (del.error) {
+        console.error("Replacing previous analysis failed:", del.error.message);
+      } else {
+        replacedId = old.id;
+        if (old.storage_path) await supabase.storage.from("case-files").remove([old.storage_path]);
+      }
+    }
+  }
+
   return NextResponse.json({
     fileName: file.name,
     truncated: extracted.truncated,
@@ -131,6 +153,7 @@ export async function POST(request: Request) {
     missingPages: extracted.missingPages ?? null,
     analysis,
     id: saved?.id ?? null,
+    replacedId,
     saveError,
   });
 }
