@@ -30,6 +30,8 @@ export interface Analysis {
   ocr?: boolean;
   /** Partly scanned PDF: how many pages were read via OCR (the rest were digital text). */
   ocrPages?: number;
+  /** Pages read via OCR (charged to the monthly quota). */
+  ocrPageCount?: number;
 }
 
 /** A row of the public.analyses table. */

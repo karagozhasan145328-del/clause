@@ -4,6 +4,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { sanitizeAnalysis, type Analysis } from "@/lib/analysis";
 import { buildSystemPrompt } from "@/lib/analysis-prompt";
 import { CONTENT_TYPE, ExtractError, MAX_UPLOAD_BYTES, extractText } from "@/lib/extract-text";
+import { getOcrUsage, recordOcrUsage } from "@/lib/ocr-quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -39,9 +40,36 @@ export async function POST(request: Request) {
   // Read text out of TXT / PDF / DOCX. Failures carry a user-safe code + message (scanned PDF, password, legacy .doc…).
   let extracted;
   try {
-    extracted = await extractText(file, { ocr: form.get("ocr") === "1", apiKey });
+    extracted = await extractText(file, {
+      ocr: form.get("ocr") === "1",
+      apiKey,
+      // Monthly per-user OCR page quota (skipped in demo mode, where there is no user).
+      quota:
+        supabase && user
+          ? {
+              check: async (pages) => {
+                // Fail closed: if usage can't be verified, don't run (paid) OCR.
+                const u = await getOcrUsage(supabase).catch((e) => {
+                  console.error("OCR quota check failed:", e);
+                  throw new ExtractError("ocr_failed", "Could not verify the OCR quota. Try again shortly.", 503);
+                });
+                if (u.used + pages > u.limit) {
+                  throw new ExtractError(
+                    "ocr_quota_exceeded",
+                    `Monthly OCR quota reached (${u.used}/${u.limit} pages used, ${pages} needed).`,
+                    429,
+                    { quota: { used: u.used, limit: u.limit, remaining: u.remaining, needed: pages } },
+                  );
+                }
+              },
+              record: (pages) => recordOcrUsage(supabase, pages, file.name),
+            }
+          : undefined,
+    });
   } catch (e) {
-    if (e instanceof ExtractError) return err(e.code, e.message, e.status);
+    if (e instanceof ExtractError) {
+      return NextResponse.json({ error: e.code, message: e.message, ...e.extra }, { status: e.status });
+    }
     console.error("Text extraction failed:", e);
     return err("extract_failed", "The file could not be read.", 422);
   }
@@ -87,6 +115,7 @@ export async function POST(request: Request) {
   if (extracted.ocr) {
     analysis.ocr = true;
     if (extracted.ocrPages) analysis.ocrPages = extracted.ocrPages;
+    if (extracted.ocrPageCount) analysis.ocrPageCount = extracted.ocrPageCount; // pages charged to the quota
   }
 
   // Persist (best effort): the analysis is still returned if saving fails.
@@ -149,6 +178,7 @@ export async function POST(request: Request) {
     truncated: extracted.truncated,
     ocr: extracted.ocr ?? false,
     ocrPages: extracted.ocrPages ?? null,
+    ocrQuota: extracted.ocr && supabase && user ? await getOcrUsage(supabase).catch(() => null) : null,
     kind: extracted.kind,
     missingPages: extracted.missingPages ?? null,
     analysis,

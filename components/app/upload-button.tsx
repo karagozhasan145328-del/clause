@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, Loader2, Upload, X } from "lucide-react";
 import { useLang } from "@/components/i18n/language-provider";
 import { AnalysisView } from "@/components/app/analysis-view";
@@ -27,6 +27,10 @@ const ERRORS: Record<string, Msg> = {
     en: "This PDF looks like a scan (no selectable text). You can have it read with OCR.",
   },
   ocr_too_many_pages: { tr: "OCR en fazla 20 sayfalık dosyaları destekliyor. PDF'i bölüp ilgili kısmı yükle.", en: "OCR supports files of up to 20 pages. Split the PDF and upload the relevant part." },
+  ocr_quota_exceeded: {
+    tr: "Bu ayki OCR sayfa hakkın doldu. Hak yeni ay başında yenilenir; bu arada metin tabanlı PDF / .docx yükleyebilirsin.",
+    en: "You've used this month's OCR page allowance. It renews at the start of next month; meanwhile upload a text-based PDF / .docx.",
+  },
   ocr_timeout: { tr: "OCR çok uzun sürdü. Daha az sayfalı bir dosya dene.", en: "OCR took too long. Try a file with fewer pages." },
   ocr_failed: { tr: "OCR servisine ulaşılamadı veya hata verdi. Biraz sonra tekrar dene.", en: "The OCR service failed or was unreachable. Try again shortly." },
   ocr_empty: { tr: "Taranmış sayfalarda okunabilir metin tanınamadı. Tarama kalitesi düşük olabilir.", en: "No readable text could be recognized in the scan. The scan quality may be too low." },
@@ -52,6 +56,7 @@ export function UploadButton({ className }: { className?: string }) {
   const [meta, setMeta] = useState<Meta>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [needsOcr, setNeedsOcr] = useState(false);
+  const [scanPages, setScanPages] = useState<number | undefined>(undefined);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [lastFile, setLastFile] = useState<File | null>(null);
   /** Saved-analysis id of the current file, so an OCR re-run can replace that record. */
@@ -97,7 +102,15 @@ export function UploadButton({ className }: { className?: string }) {
       if (!res.ok) {
         const known = data?.error ? ERRORS[data.error as string] : undefined;
         setError(known ? l(known) : (data?.message ?? (tr ? "Analiz başarısız oldu." : "Analysis failed.")));
-        if (data?.error === "scanned_pdf") setNeedsOcr(true);
+        if (data?.error === "scanned_pdf") {
+          setNeedsOcr(true);
+          setScanPages(typeof data.pages === "number" ? data.pages : undefined);
+        }
+        if (data?.error === "ocr_quota_exceeded" && data.quota) {
+          setError(
+            `${l(ERRORS.ocr_quota_exceeded)} (${data.quota.used}/${data.quota.limit} ${tr ? "sayfa kullanıldı" : "pages used"}, ${data.quota.needed} ${tr ? "gerekli" : "needed"})`,
+          );
+        }
       } else {
         setResult(data.analysis);
         setMeta({ truncated: data.truncated, missingPages: data.missingPages });
@@ -215,6 +228,7 @@ export function UploadButton({ className }: { className?: string }) {
               <OcrOffer
                 tr={tr}
                 label={tr ? "OCR ile oku ve analiz et" : "Read with OCR and analyze"}
+                needed={scanPages}
                 onClick={() => void onFile(lastFile, true)}
               />
             )}
@@ -239,6 +253,7 @@ export function UploadButton({ className }: { className?: string }) {
                     ? `Taranmış ${meta.missingPages.missing} sayfayı OCR ile oku ve yeniden analiz et`
                     : `Read the ${meta.missingPages.missing} scanned page(s) with OCR and re-analyze`
                 }
+                needed={meta.missingPages.missing}
                 onClick={() => void onFile(lastFile, true)}
               />
             )}
@@ -270,16 +285,37 @@ export function UploadButton({ className }: { className?: string }) {
 }
 
 /** OCR opt-in: the button plus the privacy / accuracy notice shown right next to it. */
-function OcrOffer({ tr, label, onClick }: { tr: boolean; label: string; onClick: () => void }) {
+function OcrOffer({ tr, label, onClick, needed }: { tr: boolean; label: string; onClick: () => void; needed?: number }) {
+  const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/ocr-quota")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((q) => alive && q && typeof q.remaining === "number" && !q.unlimited && setQuota(q))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const short = quota !== null && needed !== undefined && needed > quota.remaining;
+
   return (
     <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3">
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90"
+        disabled={short}
+        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
       >
         {label}
       </button>
+      {quota && (
+        <p className={cn("mt-2 text-xs", short ? "font-medium text-destructive" : "text-muted-foreground")}>
+          {tr
+            ? `Bu ay OCR hakkın: ${quota.remaining} / ${quota.limit} sayfa kaldı${needed !== undefined ? ` · bu dosya ${needed} sayfa kullanır` : ""}.${short ? " Kota yetersiz; yeni ay başında yenilenir." : ""}`
+            : `OCR allowance this month: ${quota.remaining} / ${quota.limit} pages left${needed !== undefined ? ` · this file uses ${needed}` : ""}.${short ? " Not enough quota; it renews at the start of next month." : ""}`}
+        </p>
+      )}
       <p className="mt-2 text-xs text-muted-foreground">
         {tr
           ? "Gizlilik: OCR için taranmış sayfalar OpenAI'ye gönderilir (yurt dışına aktarım). Müvekkil verisi içeriyorsa KVKK yükümlülüklerinizi değerlendirin. En fazla 20 taranmış sayfa. Dijital metin sayfaları olduğu gibi kalır. OCR hata yapabilir; sonucu orijinal belgeyle karşılaştırın."

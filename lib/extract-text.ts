@@ -26,6 +26,7 @@ export type ExtractErrorCode =
   | "scanned_pdf"
   | "too_many_pages"
   | "ocr_too_many_pages"
+  | "ocr_quota_exceeded"
   | "ocr_failed"
   | "ocr_timeout"
   | "ocr_empty"
@@ -36,6 +37,8 @@ export class ExtractError extends Error {
     public code: ExtractErrorCode,
     message: string,
     public status = 422,
+    /** Extra fields returned to the client alongside code/message (e.g. quota numbers). */
+    public extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -52,12 +55,16 @@ export interface Extracted {
   ocr?: boolean;
   /** How many pages were read via OCR (partly scanned PDFs). */
   ocrPages?: number;
+  /** Total pages sent to OCR (what the quota is charged). */
+  ocrPageCount?: number;
 }
 
 export interface ExtractOptions {
   /** The user explicitly agreed to send a scanned PDF to OCR (it is processed by OpenAI). */
   ocr?: boolean;
   apiKey?: string;
+  /** Monthly OCR page quota: check() throws ExtractError("ocr_quota_exceeded") before OCR, record() runs after a successful OCR. */
+  quota?: { check: (pages: number) => Promise<void>; record: (pages: number) => Promise<void> };
 }
 
 const startsWith = (b: Uint8Array, sig: number[]) => sig.every((v, i) => b[i] === v);
@@ -96,7 +103,7 @@ async function extractPdf(
   bytes: Uint8Array,
   fileName: string,
   opts: ExtractOptions,
-): Promise<{ text: string; missingPages?: Extracted["missingPages"]; ocr?: boolean; ocrPages?: number }> {
+): Promise<{ text: string; missingPages?: Extracted["missingPages"]; ocr?: boolean; ocrPages?: number; ocrPageCount?: number }> {
   const { getDocumentProxy, extractText } = await import("unpdf");
   let pages: string[];
   try {
@@ -126,13 +133,18 @@ async function extractPdf(
       throw new ExtractError(
         "scanned_pdf",
         "This PDF looks like a scan (images without selectable text). Choose OCR to read it, or upload a text-based PDF / .docx.",
+        422,
+        { pages: total }, // lets the UI show how much OCR quota this file would use
       );
     }
     if (total > OCR_MAX_PAGES) {
       throw new ExtractError("ocr_too_many_pages", `OCR supports up to ${OCR_MAX_PAGES} pages per file. Split the PDF and upload the relevant part.`, 413);
     }
     try {
-      return { text: joinOcrPages(await ocrPdf(bytes, fileName, opts.apiKey)), ocr: true };
+      await opts.quota?.check(total);
+      const text = joinOcrPages(await ocrPdf(bytes, fileName, opts.apiKey));
+      await opts.quota?.record(total);
+      return { text, ocr: true, ocrPageCount: total };
     } catch (e) {
       if (e instanceof OcrError) throw new ExtractError(e.code, e.message, e.status);
       throw e;
@@ -152,8 +164,10 @@ async function extractPdf(
 
   // OCR only the scanned pages (cheaper, and digital pages stay exact), then put each back in page order.
   try {
+    await opts.quota?.check(missingIdx.length);
     const sub = await pdfSubset(bytes, missingIdx);
     const ocrPages = splitOcrPages(await ocrPdf(sub, fileName, opts.apiKey));
+    await opts.quota?.record(missingIdx.length);
     const aligned = ocrPages.length === missingIdx.length;
     const merged = clean.map((p, i) => {
       const k = missingIdx.indexOf(i);
@@ -161,7 +175,7 @@ async function extractPdf(
     });
     // If the model returned a different number of pages, we can't map them reliably: append the OCR text after the digital pages.
     if (!aligned) merged.push(ocrPages.filter(Boolean).join("\n\n"));
-    return { text: merged.filter(Boolean).join("\n\n"), ocr: true, ocrPages: missingIdx.length };
+    return { text: merged.filter(Boolean).join("\n\n"), ocr: true, ocrPages: missingIdx.length, ocrPageCount: missingIdx.length };
   } catch (e) {
     // The "missing" pages were blank (e.g. empty last page): keep the digital text instead of failing.
     if (e instanceof OcrError && e.code === "ocr_empty") {
@@ -201,6 +215,7 @@ export async function extractText(file: File, opts: ExtractOptions = {}): Promis
   let missingPages: Extracted["missingPages"];
   let ocr = false;
   let ocrPages: number | undefined;
+  let ocrPageCount: number | undefined;
   if (kind === "text") {
     text = new TextDecoder("utf-8").decode(bytes);
   } else if (kind === "docx") {
@@ -211,13 +226,14 @@ export async function extractText(file: File, opts: ExtractOptions = {}): Promis
     missingPages = r.missingPages;
     ocr = Boolean(r.ocr);
     ocrPages = r.ocrPages;
+    ocrPageCount = r.ocrPageCount;
   }
 
   text = text.replace(/^﻿/, "").trim();
   if (!text) throw new ExtractError("empty", "No readable text was found in the file.");
 
   const truncated = text.length > MAX_CHARS;
-  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages, ocr, ocrPages };
+  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages, ocr, ocrPages, ocrPageCount };
 }
 
 export const CONTENT_TYPE: Record<FileKind, string> = {
