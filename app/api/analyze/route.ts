@@ -3,13 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { sanitizeAnalysis, type Analysis } from "@/lib/analysis";
 import { buildSystemPrompt } from "@/lib/analysis-prompt";
+import { CONTENT_TYPE, ExtractError, MAX_UPLOAD_BYTES, extractText } from "@/lib/extract-text";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MAX_BYTES = 5 * 1024 * 1024;
-const MAX_CHARS = 100_000;
-const TEXT_EXT = [".txt", ".md", ".csv", ".json", ".log"];
 
 const err = (code: string, message: string, status: number) =>
   NextResponse.json({ error: code, message }, { status });
@@ -35,15 +33,18 @@ export async function POST(request: Request) {
   const file = form.get("file");
   const lang = form.get("lang") === "en" ? "en" : "tr";
   if (!(file instanceof File) || file.size === 0) return err("no_file", "No file received.", 400);
-  if (file.size > MAX_BYTES) return err("too_large", "File is larger than 5 MB.", 413);
+  if (file.size > MAX_UPLOAD_BYTES) return err("too_large", "File is larger than 4 MB.", 413);
 
-  const name = file.name.toLowerCase();
-  if (!TEXT_EXT.some((e) => name.endsWith(e))) {
-    return err("unsupported", "Only text files are supported (.txt WhatsApp exports, .md, .csv, .json).", 415);
+  // Read text out of TXT / PDF / DOCX. Failures carry a user-safe code + message (scanned PDF, password, legacy .doc…).
+  let extracted;
+  try {
+    extracted = await extractText(file);
+  } catch (e) {
+    if (e instanceof ExtractError) return err(e.code, e.message, e.status);
+    console.error("Text extraction failed:", e);
+    return err("extract_failed", "The file could not be read.", 422);
   }
-
-  const text = (await file.text()).slice(0, MAX_CHARS).trim();
-  if (!text) return err("empty", "The file is empty.", 400);
+  const { text } = extracted;
 
   const system = buildSystemPrompt(lang);
 
@@ -88,7 +89,7 @@ export async function POST(request: Request) {
     const safeName = file.name.replace(/[^\w.\-]+/g, "_");
     const storagePath = `${user.id}/${crypto.randomUUID()}-${safeName}`;
     const up = await supabase.storage.from("case-files").upload(storagePath, file, {
-      contentType: file.type || "text/plain",
+      contentType: CONTENT_TYPE[extracted.kind],
     });
     if (up.error) console.error("Storage upload failed:", up.error.message);
 
@@ -116,7 +117,9 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     fileName: file.name,
-    truncated: file.size > MAX_CHARS,
+    truncated: extracted.truncated,
+    kind: extracted.kind,
+    missingPages: extracted.missingPages ?? null,
     analysis,
     id: saved?.id ?? null,
     saveError,
