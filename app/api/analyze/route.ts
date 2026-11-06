@@ -7,7 +7,9 @@ import { CONTENT_TYPE, ExtractError, MAX_UPLOAD_BYTES, extractText } from "@/lib
 import { getOcrUsage, recordOcrUsage } from "@/lib/ocr-quota";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
+// Total budget for the whole request, kept a little under maxDuration.
+const BUDGET_MS = 110_000;
 
 
 const err = (code: string, message: string, status: number) =>
@@ -91,11 +93,21 @@ export async function POST(request: Request) {
           { role: "user", content: text },
         ],
       }),
-      // Whatever OCR already used comes off the 60 s function budget (min 12 s so the call can still finish).
-      signal: AbortSignal.timeout(Math.max(12_000, 55_000 - (Date.now() - startedAt))),
+      // Whatever OCR already used comes off the function budget (min 30 s so the call can still finish).
+      signal: AbortSignal.timeout(Math.max(30_000, BUDGET_MS - (Date.now() - startedAt))),
     });
-  } catch {
-    return err("upstream_unreachable", "Could not reach OpenAI (timeout or network).", 504);
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "";
+    const cause = e instanceof Error ? (e.cause as { code?: string } | undefined)?.code : undefined;
+    console.error("OpenAI fetch failed:", name, cause ?? "", e instanceof Error ? e.message : e);
+    if (name === "TimeoutError" || name === "AbortError") {
+      return err("upstream_timeout", "OpenAI took too long to respond. Try a shorter document.", 504);
+    }
+    return err(
+      "upstream_unreachable",
+      `Could not reach OpenAI (network${cause ? `: ${cause}` : ""}). Check your connection / API access.`,
+      504,
+    );
   }
 
   if (!res.ok) {

@@ -29,11 +29,14 @@ const OAUTH_PROVIDERS = (process.env.NEXT_PUBLIC_OAUTH_PROVIDERS ?? "")
  * Login / signup. With Supabase keys in .env.local this does real auth; with
  * none it falls back to a DEMO BYPASS (submitting just enters the dashboard).
  */
-export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
+export function AuthScreen({ mode, initialError }: { mode: "login" | "signup"; initialError?: string }) {
   const { ui, t, lang } = useLang();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ kind: "error" | "info"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ kind: "error" | "info"; text: string } | null>(
+    // The OAuth callback sends failures back as /login?error=… — surface them instead of failing silently.
+    initialError ? { kind: "error", text: `${ui.authError} (${initialError})` } : null,
+  );
 
   function enter(e?: React.FormEvent) {
     e?.preventDefault();
