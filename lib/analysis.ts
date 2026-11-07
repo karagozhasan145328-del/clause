@@ -13,6 +13,39 @@ export interface Finding {
   legalBasis?: string[];
   /** Proposed replacement wording / corrective step. */
   suggestedFix?: string;
+  /** Multi-document analyses: which uploaded file the issue is in. */
+  document?: string;
+}
+
+export type DiscrepancyType = "date" | "amount" | "party" | "obligation" | "favorability" | "logic" | "other";
+export const DISCREPANCY_TYPES: DiscrepancyType[] = ["date", "amount", "party", "obligation", "favorability", "logic", "other"];
+
+/** One conflict / difference *between* the uploaded documents. */
+export interface Discrepancy {
+  type: DiscrepancyType;
+  title: string;
+  severity: string;
+  detail: string;
+  /** Verbatim quotes, one per document involved. */
+  sources: { document: string; quote: string }[];
+  /** For favorability differences: is it for or against the user's side? */
+  effect?: "favorable" | "unfavorable" | "neutral";
+  suggestedFix?: string;
+}
+
+/** Cross-document report (only present when two or more files were uploaded together). */
+export interface Comparison {
+  documents: string[];
+  summary: string;
+  discrepancies: Discrepancy[];
+}
+
+/** One item of the pre-submission checklist ("must be fixed before it goes to court / the other side"). */
+export interface ChecklistItem {
+  text: string;
+  severity: FindingSeverity;
+  /** "auto" = derived deterministically by the server from the report, "model" = proposed by the model. */
+  origin: "auto" | "model";
 }
 
 /** Shape the model returns (stored in analyses.result). */
@@ -22,6 +55,12 @@ export interface Analysis {
   findings: Finding[];
   contradictions: string[];
   recommendations: string[];
+  /** Cross-document comparison (multi-file uploads). */
+  comparison?: Comparison;
+  /** "Critical risk summary": the few things that matter most, in one glance. */
+  criticalSummary?: string[];
+  /** Must-fix list before filing / sending to the other side. */
+  checklist?: ChecklistItem[];
   /** How many court-decision citations were stripped by the server guard. */
   removedCitations?: number;
   /** Figures in proposed text that were not in the document and were replaced by placeholders. */
@@ -96,6 +135,16 @@ export function stripDecisionCitations(analysis: Analysis): number {
   analysis.summary = redact(analysis.summary) ?? "";
   analysis.contradictions = (analysis.contradictions ?? []).map((c) => redact(c) ?? "");
   analysis.recommendations = (analysis.recommendations ?? []).map((r) => redact(r) ?? "");
+  analysis.criticalSummary = (analysis.criticalSummary ?? []).map((r) => redact(r) ?? "");
+  analysis.checklist = (analysis.checklist ?? []).map((c) => ({ ...c, text: redact(c.text) ?? "" }));
+  if (analysis.comparison) {
+    analysis.comparison.summary = redact(analysis.comparison.summary) ?? "";
+    analysis.comparison.discrepancies = analysis.comparison.discrepancies.map((d) => ({
+      ...d,
+      detail: redact(d.detail) ?? "",
+      suggestedFix: redact(d.suggestedFix),
+    }));
+  }
   analysis.findings = (analysis.findings ?? []).map((f) => {
     const basis = (f.legalBasis ?? []).filter((b) => {
       if (DECISION_RE.test(b)) {
@@ -207,7 +256,40 @@ export function blankInventedFigures(analysis: Analysis, source: string, lang: "
     return out;
   };
   analysis.findings = analysis.findings.map((f) => ({ ...f, suggestedFix: fix(f.suggestedFix) }));
+  if (analysis.comparison) {
+    analysis.comparison.discrepancies = analysis.comparison.discrepancies.map((d) => ({ ...d, suggestedFix: fix(d.suggestedFix) }));
+  }
   return replaced;
+}
+
+/** Coerces the model's cross-document section (quotes stay verbatim; severity folded to 3 levels, sorted). */
+function sanitizeComparison(raw: unknown): Comparison | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Partial<Comparison>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const list = Array.isArray(r.discrepancies) ? r.discrepancies : [];
+  const discrepancies: Discrepancy[] = list
+    .map((d) => {
+      const type = DISCREPANCY_TYPES.includes(d?.type as DiscrepancyType) ? (d.type as DiscrepancyType) : "other";
+      const effect = d?.effect === "favorable" || d?.effect === "unfavorable" || d?.effect === "neutral" ? d.effect : undefined;
+      return {
+        type,
+        title: str(d?.title) || "—",
+        severity: normalizeSeverity(d?.severity),
+        detail: str(d?.detail),
+        sources: (Array.isArray(d?.sources) ? d.sources : [])
+          .map((s) => ({ document: str(s?.document), quote: str(s?.quote) }))
+          .filter((s) => s.document || s.quote),
+        effect,
+        suggestedFix: str(d?.suggestedFix) || undefined,
+      };
+    })
+    .sort((a, b) => SEVERITY_RANK[a.severity as FindingSeverity] - SEVERITY_RANK[b.severity as FindingSeverity]);
+  return {
+    documents: (Array.isArray(r.documents) ? r.documents : []).map(str).filter(Boolean),
+    summary: str(r.summary),
+    discrepancies,
+  };
 }
 
 /** Coerces model output into a well-formed, severity-sorted Analysis. */
@@ -223,6 +305,7 @@ export function sanitizeAnalysis(raw: Partial<Analysis>, source = "", lang: "tr"
       evidence: str(f?.evidence) || undefined,
       legalBasis: strs(f?.legalBasis),
       suggestedFix: str(f?.suggestedFix) || undefined,
+      document: str(f?.document) || undefined,
     }))
     .sort((a, b) => SEVERITY_RANK[a.severity as FindingSeverity] - SEVERITY_RANK[b.severity as FindingSeverity]);
 
@@ -233,6 +316,13 @@ export function sanitizeAnalysis(raw: Partial<Analysis>, source = "", lang: "tr"
     contradictions: strs(raw.contradictions),
     recommendations: strs(raw.recommendations),
   };
+  const comparison = sanitizeComparison(raw.comparison);
+  if (comparison) analysis.comparison = comparison;
+  analysis.criticalSummary = strs(raw.criticalSummary).slice(0, 6);
+  analysis.checklist = (Array.isArray(raw.checklist) ? raw.checklist : [])
+    .map((c) => ({ text: str(c?.text), severity: normalizeSeverity(c?.severity), origin: "model" as const }))
+    .filter((c) => c.text)
+    .slice(0, 15);
   const removed = stripDecisionCitations(analysis);
   if (removed > 0) analysis.removedCitations = removed;
   const blanked = blankInventedFigures(analysis, source, lang);

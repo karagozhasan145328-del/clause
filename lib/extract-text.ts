@@ -4,12 +4,13 @@
  * so a renamed or corrupt file is rejected with a clear reason instead of being fed to a parser.
  */
 
+import { UdfError, extractUdfText } from "@/lib/udf";
 import { OCR_MAX_PAGES, OcrError, joinOcrPages, ocrPdf, splitOcrPages } from "@/lib/ocr";
 
-export type FileKind = "text" | "pdf" | "docx";
+export type FileKind = "text" | "pdf" | "docx" | "udf";
 
 export const TEXT_EXT = [".txt", ".md", ".csv", ".json", ".log"];
-export const ACCEPT_EXT = [...TEXT_EXT, ".pdf", ".docx"];
+export const ACCEPT_EXT = [...TEXT_EXT, ".pdf", ".docx", ".udf"];
 
 /** Vercel serverless request bodies are capped at 4.5 MB; stay under it. */
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -84,6 +85,10 @@ export function detectKind(name: string, bytes: Uint8Array): FileKind {
     if (!isZipSig) throw new ExtractError("corrupt", "This file is not a valid .docx document.");
     return "docx";
   }
+  if (lower.endsWith(".udf")) {
+    if (isPdfSig || isOleSig) throw new ExtractError("corrupt", "This file is not a valid UYAP .udf document.");
+    return "udf";
+  }
   if (lower.endsWith(".doc") || isOleSig) {
     throw new ExtractError(
       "legacy_doc",
@@ -96,7 +101,7 @@ export function detectKind(name: string, bytes: Uint8Array): FileKind {
     if (isPdfSig || isZipSig || isOleSig) throw new ExtractError("corrupt", "The file content does not match its extension.");
     return "text";
   }
-  throw new ExtractError("unsupported", "Unsupported file type. Use .pdf, .docx, .txt, .md, .csv or .json.", 415);
+  throw new ExtractError("unsupported", "Unsupported file type. Use .pdf, .docx, .udf, .txt, .md, .csv or .json.", 415);
 }
 
 async function extractPdf(
@@ -206,6 +211,17 @@ async function extractDocx(bytes: Uint8Array): Promise<string> {
   }
 }
 
+async function extractUdf(bytes: Uint8Array): Promise<string> {
+  try {
+    return await extractUdfText(bytes);
+  } catch (e) {
+    if (e instanceof UdfError && e.message === "no_content") {
+      throw new ExtractError("corrupt", "No document text was found in this .udf file.");
+    }
+    throw new ExtractError("corrupt", "The .udf file could not be read. It may be damaged.");
+  }
+}
+
 /** Reads an uploaded file and returns its plain text. Throws ExtractError with a user-safe message. */
 export async function extractText(file: File, opts: ExtractOptions = {}): Promise<Extracted> {
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -220,6 +236,8 @@ export async function extractText(file: File, opts: ExtractOptions = {}): Promis
     text = new TextDecoder("utf-8").decode(bytes);
   } else if (kind === "docx") {
     text = await extractDocx(bytes);
+  } else if (kind === "udf") {
+    text = await extractUdf(bytes);
   } else {
     const r = await extractPdf(bytes, file.name, opts);
     text = r.text;
@@ -240,4 +258,5 @@ export const CONTENT_TYPE: Record<FileKind, string> = {
   text: "text/plain",
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  udf: "application/zip",
 };

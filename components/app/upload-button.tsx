@@ -8,8 +8,9 @@ import type { Analysis } from "@/lib/analysis";
 import { cn } from "@/lib/utils";
 
 /** Mirrors lib/extract-text.ts (kept literal here: that module is server-only). */
-const ACCEPT = ".pdf,.docx,.doc,.txt,.md,.csv,.json,.log";
-const ALLOWED = [".pdf", ".docx", ".doc", ".txt", ".md", ".csv", ".json", ".log"];
+const ACCEPT = ".pdf,.docx,.udf,.doc,.txt,.md,.csv,.json,.log";
+const ALLOWED = [".pdf", ".docx", ".udf", ".doc", ".txt", ".md", ".csv", ".json", ".log"];
+const MAX_FILES = 5;
 const MAX_BYTES = 4 * 1024 * 1024;
 
 type Msg = { tr: string; en: string };
@@ -17,8 +18,9 @@ type Msg = { tr: string; en: string };
 /** Server error code → message in both languages. */
 const ERRORS: Record<string, Msg> = {
   unauthorized: { tr: "Analiz için giriş yapmalısın.", en: "Sign in to run an analysis." },
-  too_large: { tr: "Dosya 4 MB'tan büyük. Daha küçük bir dosya yükle veya bölerek gönder.", en: "The file is larger than 4 MB. Upload a smaller file or split it." },
-  unsupported: { tr: "Bu dosya türü desteklenmiyor. PDF, Word (.docx) veya metin (.txt) yükle.", en: "Unsupported file type. Upload a PDF, Word (.docx) or text (.txt) file." },
+  too_many_files: { tr: "Aynı anda en fazla 5 dosya yükleyebilirsin.", en: "You can upload at most 5 files at once." },
+  too_large: { tr: "Dosya(lar) toplamda 4 MB'tan büyük. Daha küçük dosya yükle veya bölerek gönder.", en: "The file(s) exceed 4 MB in total. Upload smaller files or split them." },
+  unsupported: { tr: "Bu dosya türü desteklenmiyor. PDF, Word (.docx), UYAP (.udf) veya metin (.txt) yükle.", en: "Unsupported file type. Upload a PDF, Word (.docx), UYAP (.udf) or text (.txt) file." },
   legacy_doc: { tr: "Eski Word (.doc) biçimi desteklenmiyor. Word'de “Farklı kaydet” ile .docx veya PDF olarak kaydedip tekrar yükle.", en: "Legacy .doc is not supported. In Word choose “Save as” .docx or PDF and upload again." },
   corrupt: { tr: "Dosya okunamadı; bozuk olabilir ya da uzantısı içeriğiyle uyuşmuyor.", en: "The file couldn't be read; it may be damaged or its extension doesn't match its content." },
   password_protected: { tr: "Dosya şifreli. Şifreyi kaldırıp tekrar yükle.", en: "The file is password-protected. Remove the password and upload again." },
@@ -58,7 +60,7 @@ export function UploadButton({ className }: { className?: string }) {
   const [needsOcr, setNeedsOcr] = useState(false);
   const [scanPages, setScanPages] = useState<number | undefined>(undefined);
   const [ocrBusy, setOcrBusy] = useState(false);
-  const [lastFile, setLastFile] = useState<File | null>(null);
+  const [lastFiles, setLastFiles] = useState<File[]>([]);
   /** Saved-analysis id of the current file, so an OCR re-run can replace that record. */
   const [savedId, setSavedId] = useState<string | null>(null);
 
@@ -71,26 +73,31 @@ export function UploadButton({ className }: { className?: string }) {
     setFileName("");
   }
 
-  async function onFile(file: File | undefined, ocr = false) {
-    if (!file) return;
-    setLastFile(file);
-    // Only an OCR re-run of the same file replaces the previous record; a new file never does.
-    const replaces = ocr && file === lastFile ? savedId : null;
+  async function onFiles(list: File[] | FileList | null | undefined, ocr = false) {
+    const files = Array.from(list ?? []);
+    if (files.length === 0) return;
+    const multi = files.length > 1;
+    setLastFiles(files);
+    // Only an OCR re-run of the same single file replaces the previous record; new files never do.
+    const replaces = ocr && !multi && lastFiles.length === 1 && files[0] === lastFiles[0] ? savedId : null;
     setSavedId(null);
     setOpen(true);
     reset();
     setOcrBusy(ocr);
-    setFileName(file.name);
+    setFileName(files.map((f) => f.name).join(" + "));
 
     // Fast client-side checks (the server re-validates everything).
-    const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-    if (!ALLOWED.includes(ext)) return setError(l(ERRORS.unsupported));
-    if (file.size > MAX_BYTES) return setError(l(ERRORS.too_large));
-    if (file.size === 0) return setError(l(ERRORS.empty));
+    if (files.length > MAX_FILES) return setError(l(ERRORS.too_many_files));
+    for (const file of files) {
+      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+      if (!ALLOWED.includes(ext)) return setError(l(ERRORS.unsupported));
+      if (file.size === 0) return setError(l(ERRORS.empty));
+    }
+    if (files.reduce((n, f) => n + f.size, 0) > MAX_BYTES) return setError(l(ERRORS.too_large));
 
     setBusy(true);
     const body = new FormData();
-    body.append("file", file);
+    for (const file of files) body.append("file", file);
     body.append("lang", lang);
     if (ocr) {
       body.append("ocr", "1"); // explicit opt-in: a scanned PDF is then read by OpenAI
@@ -136,7 +143,7 @@ export function UploadButton({ className }: { className?: string }) {
     onDrop: (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
-      if (!busy) void onFile(e.dataTransfer.files?.[0]);
+      if (!busy) void onFiles(e.dataTransfer.files);
     },
   };
 
@@ -144,7 +151,7 @@ export function UploadButton({ className }: { className?: string }) {
 
   return (
     <>
-      <input ref={inputRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+      <input ref={inputRef} type="file" accept={ACCEPT} multiple className="hidden" onChange={(e) => onFiles(e.target.files)} />
       <button
         type="button"
         onClick={() => {
@@ -175,7 +182,7 @@ export function UploadButton({ className }: { className?: string }) {
               <div className="min-w-0">
                 <p className="label-mono text-primary">{tr ? "Analiz" : "Analysis"}</p>
                 <h2 className="truncate font-display text-xl font-semibold">
-                  {fileName || (tr ? "Dosya yükle" : "Upload a file")}
+                  {fileName || (tr ? "Dosya yükle" : "Upload files")}
                 </h2>
               </div>
               <button onClick={() => !busy && setOpen(false)} className="ml-auto text-muted-foreground hover:text-foreground" aria-label="Close">
@@ -197,12 +204,17 @@ export function UploadButton({ className }: { className?: string }) {
               >
                 <FileText className="h-7 w-7 text-primary" />
                 <p className="text-sm font-medium">
-                  {tr ? "Dosyayı buraya sürükle ya da seçmek için tıkla" : "Drag a file here or click to browse"}
+                  {tr ? "Dosya(lar)ı buraya sürükle ya da seçmek için tıkla" : "Drag file(s) here or click to browse"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {tr
-                    ? "PDF, Word (.docx), .txt, .md, .csv, .json · en fazla 4 MB · taranmış PDF'ler için OCR seçeneği sunulur"
-                    : "PDF, Word (.docx), .txt, .md, .csv, .json · up to 4 MB · OCR is offered for scanned PDFs"}
+                    ? "PDF, Word (.docx), UYAP (.udf), .txt, .md, .csv, .json · toplam en fazla 4 MB · taranmış PDF'ler için OCR seçeneği sunulur"
+                    : "PDF, Word (.docx), UYAP (.udf), .txt, .md, .csv, .json · up to 4 MB in total · OCR is offered for scanned PDFs"}
+                </p>
+                <p className="rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                  {tr
+                    ? `Birden fazla dosya (en fazla ${MAX_FILES}) seçersen belgeler birbiriyle karşılaştırılır: tarih/tutar çelişkileri, lehte-aleyhte farklar ve tutarsızlıklar raporlanır.`
+                    : `Select several files (up to ${MAX_FILES}) and they are compared with each other: date/amount conflicts, favorable/unfavorable differences and inconsistencies are reported.`}
                 </p>
               </div>
             )}
@@ -215,8 +227,12 @@ export function UploadButton({ className }: { className?: string }) {
                     ? "Taranmış sayfalar OCR ile okunuyor, ardından analiz ediliyor… (30-60 sn sürebilir)"
                     : "Reading the scanned pages with OCR, then analyzing… (can take 30-60 s)"
                   : tr
-                    ? "Dosya okunuyor ve analiz ediliyor…"
-                    : "Reading and analyzing the file…"}
+                    ? lastFiles.length > 1
+                      ? "Dosyalar okunuyor, ayrı ayrı analiz ediliyor ve birbiriyle karşılaştırılıyor…"
+                      : "Dosya okunuyor ve analiz ediliyor…"
+                    : lastFiles.length > 1
+                      ? "Reading, analyzing and cross-comparing the files…"
+                      : "Reading and analyzing the file…"}
               </p>
             )}
             {error && (
@@ -224,12 +240,12 @@ export function UploadButton({ className }: { className?: string }) {
                 {error}
               </p>
             )}
-            {needsOcr && lastFile && (
+            {needsOcr && lastFiles.length > 0 && (
               <OcrOffer
                 tr={tr}
                 label={tr ? "OCR ile oku ve analiz et" : "Read with OCR and analyze"}
                 needed={scanPages}
-                onClick={() => void onFile(lastFile, true)}
+                onClick={() => void onFiles(lastFiles, true)}
               />
             )}
             {saveError && (
@@ -245,7 +261,7 @@ export function UploadButton({ className }: { className?: string }) {
                   : `${meta.missingPages.missing} of ${meta.missingPages.total} PDF pages have no readable text (possibly scanned). The analysis only covers pages with text.`}
               </p>
             )}
-            {meta.missingPages && lastFile && !result?.ocr && (
+            {meta.missingPages && lastFiles.length > 0 && !result?.ocr && (
               <OcrOffer
                 tr={tr}
                 label={
@@ -254,7 +270,7 @@ export function UploadButton({ className }: { className?: string }) {
                     : `Read the ${meta.missingPages.missing} scanned page(s) with OCR and re-analyze`
                 }
                 needed={meta.missingPages.missing}
-                onClick={() => void onFile(lastFile, true)}
+                onClick={() => void onFiles(lastFiles, true)}
               />
             )}
             {meta.truncated && (
@@ -273,7 +289,7 @@ export function UploadButton({ className }: { className?: string }) {
                   }}
                   className="mt-5 text-sm font-medium text-primary hover:underline"
                 >
-                  {tr ? "Başka bir dosya analiz et" : "Analyze another file"}
+                  {tr ? "Başka dosya(lar) analiz et" : "Analyze other file(s)"}
                 </button>
               </div>
             )}

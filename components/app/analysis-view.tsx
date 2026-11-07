@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, ShieldAlert } from "lucide-react";
+import { ShieldAlert, Siren } from "lucide-react";
 import { useLang } from "@/components/i18n/language-provider";
 import { RISK_META, riskLabel } from "@/lib/risk";
 import { LEVELS3, SEVERITY_RANK, normalizeSeverity, type Analysis, type Finding } from "@/lib/analysis";
+import { ChecklistTab, ComparisonTab, CopyButton } from "@/components/app/report-tabs";
+import { cn } from "@/lib/utils";
+
+type Tab = "report" | "comparison" | "checklist";
 
 /** Renders a stored/returned analysis: findings ranked most-severe first, with legal basis and a suggested fix. */
 export function AnalysisView({ result }: { result: Analysis }) {
@@ -21,6 +25,15 @@ export function AnalysisView({ result }: { result: Analysis }) {
     acc[k] = (acc[k] ?? 0) + 1;
     return acc;
   }, {});
+
+  const [tab, setTab] = useState<Tab>("report");
+  const comparison = result.comparison;
+  const checklist = result.checklist ?? [];
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: "report", label: tr ? "Rapor" : "Report", count: findings.length },
+    ...(comparison ? [{ id: "comparison" as const, label: tr ? "Belge karşılaştırması" : "Cross-document", count: comparison.discrepancies.length }] : []),
+    ...(checklist.length ? [{ id: "checklist" as const, label: tr ? "Sunum öncesi kontrol" : "Pre-submission check", count: checklist.length }] : []),
+  ];
 
   const fixes = findings.map((f) => f.suggestedFix?.trim()).filter((x): x is string => Boolean(x));
 
@@ -68,7 +81,45 @@ export function AnalysisView({ result }: { result: Analysis }) {
         </p>
       ) : null}
 
-      {findings.length > 0 && (
+      {result.criticalSummary && result.criticalSummary.length > 0 && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5">
+          <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-destructive">
+            <Siren className="h-3.5 w-3.5" />
+            {tr ? "Kritik risk özeti" : "Critical risk summary"}
+          </h3>
+          <ul className="list-disc space-y-1 pl-5">
+            {result.criticalSummary.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {tabs.length > 1 && (
+        <div role="tablist" className="flex flex-wrap gap-1 border-b border-border">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              type="button"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "-mb-px cursor-pointer border-b-2 px-3 py-2 text-xs font-semibold transition-colors",
+                tab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t.label}
+              {t.count !== undefined && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "comparison" && comparison && <ComparisonTab comparison={comparison} tr={tr} />}
+      {tab === "checklist" && checklist.length > 0 && <ChecklistTab items={checklist} tr={tr} />}
+
+      {tab === "report" && findings.length > 0 && (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="label-mono text-muted-foreground">
@@ -90,8 +141,12 @@ export function AnalysisView({ result }: { result: Analysis }) {
         </div>
       )}
 
-      <Section title={tr ? "Çelişkiler" : "Contradictions"} items={result.contradictions} />
-      <Section title={tr ? "Öneriler" : "Recommendations"} items={result.recommendations} />
+      {tab === "report" && (
+        <>
+          <Section title={tr ? "Çelişkiler" : "Contradictions"} items={result.contradictions} />
+          <Section title={tr ? "Öneriler" : "Recommendations"} items={result.recommendations} />
+        </>
+      )}
 
       <p className="border-t border-border pt-3 text-[11px] text-muted-foreground">
         {tr
@@ -113,6 +168,7 @@ function FindingCard({ finding: f, rank, tr, lang }: { finding: Finding; rank: n
           {riskLabel(sev, lang)}
         </span>
         <span className="font-semibold">{f.title}</span>
+        {f.document && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{f.document}</span>}
       </div>
 
       {f.legalBasis && f.legalBasis.length > 0 && (
@@ -143,25 +199,6 @@ function FindingCard({ finding: f, rank, tr, lang }: { finding: Finding; rank: n
         </div>
       )}
     </li>
-  );
-}
-
-function CopyButton({ text, tr, label }: { text: string; tr: boolean; label?: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        void navigator.clipboard?.writeText(text).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
-        });
-      }}
-      className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-    >
-      {done ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      {done ? (tr ? "Kopyalandı" : "Copied") : (label ?? (tr ? "Kopyala" : "Copy"))}
-    </button>
   );
 }
 
