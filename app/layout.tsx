@@ -34,7 +34,8 @@ const mono = JetBrains_Mono({
   variable: "--font-mono-app",
   subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600", "700"],
+  // Variable font: no `weight` list, so Turbopack loads the single variable file (a weight list made it
+  // emit several @font-face rules for the same URL and fail with "queries have exactly one entry").
 });
 
 export const metadata: Metadata = {
