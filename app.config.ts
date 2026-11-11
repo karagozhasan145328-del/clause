@@ -165,6 +165,7 @@ export const appConfig: AppConfig = {
     {
       label: { tr: "Kütüphane", en: "Library" },
       items: [
+        { label: { tr: "Emsal arşivi", en: "Precedent archive" }, href: "/archive", icon: "scale" },
         { label: { tr: "Risk kalıp kütüphanesi", en: "Risk pattern library" }, href: "/library", icon: "library" },
         { label: { tr: "Şablonlar", en: "Templates" }, href: "/templates", icon: "file-stack", muted: true, badge: { tr: "Yakında", en: "Soon" } },
         { label: { tr: "Entegrasyonlar", en: "Integrations" }, href: "/settings", icon: "plug" },

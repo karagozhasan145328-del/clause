@@ -64,6 +64,8 @@ export interface ExtractOptions {
   /** The user explicitly agreed to send a scanned PDF to OCR (it is processed by OpenAI). */
   ocr?: boolean;
   apiKey?: string;
+  /** Overrides the default MAX_CHARS cut-off (the precedent archive keeps far longer texts). */
+  maxChars?: number;
   /** Monthly OCR page quota: check() throws ExtractError("ocr_quota_exceeded") before OCR, record() runs after a successful OCR. */
   quota?: { check: (pages: number) => Promise<void>; record: (pages: number) => Promise<void> };
 }
@@ -250,8 +252,9 @@ export async function extractText(file: File, opts: ExtractOptions = {}): Promis
   text = text.replace(/^﻿/, "").trim();
   if (!text) throw new ExtractError("empty", "No readable text was found in the file.");
 
-  const truncated = text.length > MAX_CHARS;
-  return { kind, text: truncated ? text.slice(0, MAX_CHARS) : text, truncated, missingPages, ocr, ocrPages, ocrPageCount };
+  const limit = opts.maxChars ?? MAX_CHARS;
+  const truncated = text.length > limit;
+  return { kind, text: truncated ? text.slice(0, limit) : text, truncated, missingPages, ocr, ocrPages, ocrPageCount };
 }
 
 export const CONTENT_TYPE: Record<FileKind, string> = {
