@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -16,8 +17,14 @@ export async function requireUser(): Promise<
 > {
   if (!isSupabaseConfigured) return { res: err("no_supabase", "The precedent archive needs Supabase. Connect it in .env.local.", 503) };
   const supabase = await createClient();
-  const user = (await supabase.auth.getUser()).data.user;
-  if (!user) return { res: err("unauthorized", "Sign in to use the archive.", 401) };
+  const { data, error } = await supabase.auth.getUser();
+  const user = data.user;
+  if (!user) {
+    // Log why (no cookie vs. expired/invalid token vs. Supabase unreachable) so a "signed in but rejected" report can be diagnosed.
+    const hasCookie = (await cookies()).getAll().some((c) => c.name.startsWith("sb-"));
+    console.error(`Archive auth rejected: ${error?.message ?? "no user"} (supabase cookie present: ${hasCookie}, status: ${error?.status ?? "n/a"})`);
+    return { res: err("unauthorized", "Your session is missing or has expired. Sign in again to use the archive.", 401) };
+  }
   return { supabase, userId: user.id };
 }
 

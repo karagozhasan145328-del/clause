@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 type Msg = { tr: string; en: string };
 const ERRORS: Record<string, Msg> = {
-  unauthorized: { tr: "Giriş yapmalısın.", en: "Sign in first." },
+  unauthorized: { tr: "Oturumun yok ya da süresi dolmuş. Yeniden giriş yap.", en: "Your session is missing or has expired. Sign in again." },
   no_supabase: { tr: "Arşiv için Supabase bağlantısı gerekli.", en: "The archive needs a Supabase connection." },
   unsupported: { tr: "Desteklenmeyen dosya türü (PDF, DOCX, UDF, TXT, MD).", en: "Unsupported file type (PDF, DOCX, UDF, TXT, MD)." },
   too_large: { tr: "Dosya 25 MB'tan büyük.", en: "The file is larger than 25 MB." },

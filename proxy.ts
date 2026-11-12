@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase/config";
 
 /** Pages that need a signed-in user once Supabase is connected. */
-const PROTECTED = ["/dashboard", "/cases", "/reports", "/criteria", "/library", "/settings", "/templates"];
+const PROTECTED = ["/dashboard", "/cases", "/reports", "/criteria", "/library", "/archive", "/settings", "/templates"];
 const AUTH_PAGES = ["/login", "/signup"];
 
 const matches = (path: string, list: string[]) =>
