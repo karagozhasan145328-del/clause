@@ -37,7 +37,14 @@ export async function POST(request: Request) {
   if (auth.res) return auth.res;
 
   const apiKey = process.env.ANTHROPIC_API_KEY?.replace(/^﻿/, "").trim();
-  if (!apiKey) return err("no_key", "ANTHROPIC_API_KEY is not set in .env.local — add it and restart the dev server.", 503);
+  if (!apiKey) {
+    console.error("ANTHROPIC_API_KEY is missing from the server environment (on Vercel: Project Settings → Environment Variables, then redeploy).");
+    // Vercel sets VERCEL=1 at build and runtime; point the operator at the right place without leaking anything.
+    const message = process.env.VERCEL
+      ? "The AI service is not configured on this deployment. Add ANTHROPIC_API_KEY under Vercel → Project Settings → Environment Variables (Production) and redeploy."
+      : "ANTHROPIC_API_KEY is not set in .env.local — add it and restart the dev server.";
+    return err("no_key", message, 503);
+  }
 
   const body = (await request.json().catch(() => null)) as { question?: unknown; filters?: unknown; lang?: unknown } | null;
   const question = typeof body?.question === "string" ? body.question.trim().slice(0, 2000) : "";
