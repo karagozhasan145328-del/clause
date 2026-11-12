@@ -159,6 +159,10 @@ export function ArchiveUploader({ onChanged }: { onChanged?: () => void }) {
         <p className="text-sm font-medium">
           {tr ? "Emsal kararları buraya sürükle ya da seçmek için tıkla" : "Drag precedent decisions here or click to browse"}
         </p>
+        <span className="mt-1 inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-sm">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+          {tr ? "Emsal Karar Yükle" : "Upload Precedent"}
+        </span>
         <p className="text-xs text-muted-foreground">
           {tr
             ? `PDF, Word (.docx), UYAP (.udf), .txt · dosya başına en fazla 25 MB · tek seferde ${MAX_FILES_PER_BATCH} dosya`

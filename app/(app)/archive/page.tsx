@@ -9,7 +9,7 @@ import { AnswerWithCitations } from "@/components/archive/answer-with-citations"
 import type { AskResult } from "@/lib/archive/shared";
 import { cn } from "@/lib/utils";
 
-type Tab = "ask" | "search" | "upload";
+type Tab = "ask" | "search";
 
 export default function ArchivePage() {
   const { lang } = useLang();
@@ -48,7 +48,6 @@ export default function ArchivePage() {
   const tabs: { id: Tab; label: string }[] = [
     { id: "ask", label: tr ? "Soru sor" : "Ask" },
     { id: "search", label: tr ? "Emsal ara" : "Search" },
-    { id: "upload", label: tr ? "Arşiv" : "Archive" },
   ];
 
   return (
@@ -63,7 +62,11 @@ export default function ArchivePage() {
           : "Answers rely only on the decisions you uploaded, and every quote is verified against the source text."}
       </p>
 
-      <div className="mt-5 flex gap-1 border-b border-border">
+      <section className="mt-6" aria-label={tr ? "Emsal karar yükle" : "Upload precedent"}>
+        <ArchiveUploader />
+      </section>
+
+      <div className="mt-8 flex gap-1 border-b border-border">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -117,7 +120,6 @@ export default function ArchivePage() {
           </div>
         )}
         {tab === "search" && <PrecedentSearch />}
-        {tab === "upload" && <ArchiveUploader />}
       </div>
     </div>
   );

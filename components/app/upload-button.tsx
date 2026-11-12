@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
 import { FileText, Loader2, Upload, X } from "lucide-react";
 import { useLang } from "@/components/i18n/language-provider";
 import { AnalysisView } from "@/components/app/analysis-view";
@@ -49,7 +51,14 @@ export function UploadButton({ className }: { className?: string }) {
   const tr = lang === "tr";
   const l = (m: Msg) => (tr ? m.tr : m.en);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  // false during SSR/hydration, true on the client: the portal target (document.body) only exists there.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -63,6 +72,21 @@ export function UploadButton({ className }: { className?: string }) {
   const [lastFiles, setLastFiles] = useState<File[]>([]);
   /** Saved-analysis id of the current file, so an OCR re-run can replace that record. */
   const [savedId, setSavedId] = useState<string | null>(null);
+
+  // The topbar survives navigation, so close the dialog whenever the route changes.
+  const [lastPath, setLastPath] = useState(pathname);
+  if (lastPath !== pathname) {
+    setLastPath(pathname);
+    setOpen(false);
+  }
+
+  // Escape closes the dialog (unless an analysis is running).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, busy]);
 
   function reset() {
     setNeedsOcr(false);
@@ -172,8 +196,13 @@ export function UploadButton({ className }: { className?: string }) {
         {tr ? "Dosya yükle" : "Upload case"}
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={() => !busy && setOpen(false)}>
+      {open && mounted && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={() => !busy && setOpen(false)}
+        >
           <div
             className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-soft"
             onClick={(e) => e.stopPropagation()}
@@ -294,7 +323,8 @@ export function UploadButton({ className }: { className?: string }) {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
